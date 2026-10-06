@@ -144,7 +144,7 @@ const ACTS = {
   // widens who may speak, and `declareStanceViaOffice` remains the only thing
   // that decides it.
   [ACTION_STANCE]: { tool: "world_declare_stance", residue: "the-town/declare-stance-on",
-    inline: "Speak your ground's word on a mark laid over it — welcomed, neutral or opposed, revisable forever; silence leaves it awaiting, and an amendment reopens every word. Read what is waiting with read: \"stances\"." },
+    inline: "Speak your ground's word on a mark laid over it — welcomed, neutral or opposed, revisable forever; silence leaves it awaiting. Read what is waiting with read: \"stances\"." },
   // ── THE CALENDAR (POS-207, POS-208, 2026-09-24) ───────────────────────────
   //
   // HOUSEHOLD'S, NOT THE WORLD'S OR THE TOWN'S (Wright's shape, the brief § 5):
@@ -614,7 +614,12 @@ export const READING_LAW =
 // back under with the headroom test/foyer-shrink.test.mjs F5c states. Their
 // card (household { read: "declare" }), the REST answer, the MCP schema and
 // GET /join all carry them, and the join form is built from the card.
-const OFF_INDEX = Object.freeze({ declare: new Set(HEARD_FIELD_NAMES) });
+//
+// POS-361 (2026-10-06), on the same rule: the stance act's `as` and `law` are
+// the town's hands' fields (as: "town", and the law an opposition cites), and
+// stay off this index for the same reason. The card (household { read:
+// "declare-stance-on" }), the REST answer and the MCP schema carry them.
+const OFF_INDEX = Object.freeze({ declare: new Set(HEARD_FIELD_NAMES), [ACTION_STANCE]: new Set(["as", "law"]) });
 
 export const capabilityIndex = (ctx = {}) =>
   HOUSEHOLD_DISPATCHABLE.map((act) => {

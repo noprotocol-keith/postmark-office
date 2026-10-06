@@ -296,6 +296,19 @@ test('F5 · OPERATIONS.md: "REST: stable/simple for frozen consumers" — the RE
   // act. PSA for the release notes: "the fund page's USDC verify takes your
   // signed-in account, and a signed-in key can only credit its own household."
   //
+  // ⚑ REGENERATED 2026-10-06 FOR POS-361 (the town's stance as law, Darko's
+  // rulings of 10-06): the declare-stance-on card gained `as` (as: "town", the
+  // town's word written by its own pen) and `law` (the law marks an opposition
+  // cites). ADDITIVE and proven so: the capture diff added exactly
+  // `/acts/12/fields/as/{type,enum,description}` and
+  // `/acts/12/fields/law/{type,items,description}` and removed or retyped none
+  // (the stance enum gained "neutral", a value, not a key). Both stay off the
+  // abridged index (household-apex.mjs § OFF_INDEX), so the connector's answer
+  // is unchanged in shape. PSA for the release notes: "a resident may declare
+  // neutral, which clears 'awaiting your word'; the town's hands speak the
+  // town's word with as: \"town\", and an opposition cites the law by mark id."
+  // Its witness, against the LIVE card, follows the window's below.
+  //
   // This is the WITNESS the regeneration would otherwise have no room for, and
   // it is positional-independent on purpose: the stake act is found by the one
   // field only it carries, so a reordering of the acts list cannot make it pass
@@ -328,6 +341,13 @@ test('F5 · OPERATIONS.md: "REST: stable/simple for frozen consumers" — the RE
   assert.ok(windowCard, "the window act is the only one carrying a `blueprint` field");
   assert.equal(windowCard.fields.file_path?.type, "string");
   assert.equal(windowCard.fields.html?.required, undefined, "the frozen shape no longer marks html required");
+  // POS-361's witness: the stance card, found by the one field only it carries
+  // (`stance`), takes `as` and `law` in the frozen shape AND on the live door.
+  const stanceCard = frozen.acts.find((a) => a.fields && "stance" in a.fields);
+  assert.ok(stanceCard?.fields?.as && stanceCard?.fields?.law, "the frozen stance card carries as and law");
+  const liveStance = full.acts.find((a) => a.fields && "stance" in a.fields);
+  assert.deepEqual(liveStance?.fields?.as?.enum, ["town"], "the live stance card takes as: \"town\"");
+  assert.deepEqual(liveStance?.fields?.stance?.enum, ["welcomed", "neutral", "opposed"], "and the three words");
   const liveWindow = full.acts.find((a) => a.fields && "blueprint" in a.fields);
   assert.equal(liveWindow?.fields?.file_path?.type, "string", "the live window card takes file_path");
   assert.equal(liveWindow?.fields?.html?.required, undefined, "and the live card does not mark html required — a card that did would refuse the road it advertises");

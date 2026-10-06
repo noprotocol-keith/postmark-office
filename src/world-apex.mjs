@@ -667,7 +667,7 @@ export const declareStanceAtOffice = (args, key) =>
 export const STANDING_SCOPED_DOORS = Object.freeze({
   [ACTION_STANCE]: Object.freeze({
     door: "household",
-    perform: `household { do: "${ACTION_STANCE}", args: { on: …, stance: "welcomed"|"opposed" } }`,
+    perform: `household { do: "${ACTION_STANCE}", args: { on: …, stance: "welcomed"|"neutral"|"opposed" } }`,
     observe: 'household { read: "stances" }',
     why: "what awaits your word is derived from the ground your HOUSE holds, never from where your feet are — so it is spoken at the door where standing lives",
   }),

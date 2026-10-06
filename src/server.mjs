@@ -28,7 +28,7 @@ import { judgeRoute, withRenamed, PATCH_PAPER_DOORS } from "./one-contract.mjs";
 import { sendAtDoor } from "./send-at-door.mjs";
 import { TOWN_TOOL, townDispatchToolFor } from "./town-apex.mjs";
 import { householdApex, APEX_ONLY_FIELDS } from "./household-apex.mjs"; // the third door (2026-08-15)
-import { handleOauth, oauthLookup, oauthSchema, mintHouseholdKey, keyLookup, mintBerth, berthLookup, berthTaken, acknowledgeVisitorRules, BERTH_SLUG, FROM_TOWN, mintClaim, claimLookup, claimState, claimCosignUrlFor, claimStateUrlFor, sweepClaims } from "./oauth.mjs";
+import { handleOauth, oauthLookup, oauthSchema, mintHouseholdKey, keyLookup, mintBerth, berthLookup, berthTaken, acknowledgeVisitorRules, BERTH_SLUG, FROM_TOWN, mintClaim, claimLookup, claimState, claimCosignUrlFor, claimStateUrlFor, sweepClaims, SignInUnreadable } from "./oauth.mjs";
 import { requestResidency, isReservedHandle } from "./residency.mjs";
 import { declareViaOffice, SETTLING_ASHORE } from "./declare.mjs";
 import { uploadMedia } from "./media.mjs";
@@ -39,7 +39,7 @@ import { rolesSchema, roleGate, roleGatesOn, ROLE_SUBSCRIBER } from "./roles.mjs
 import { openPaper, paperworkStoreOn } from "./paperwork.mjs"; // POS-271: sign-in, roles, the media ledger and the town log, one door
 import { arrivalPage } from "./arrival.mjs";
 import { townSummary, residentList, residentPage, resident, mailList, letter, search, bulletinList, bulletinEntry, townLedger, townDocs, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, regionOne, home, identityOf, repoLog } from "./queries.mjs";
-import { householdOf } from "./households.mjs";
+import { householdsFor, withHouseholdBlock } from "./households.mjs";
 import * as townIndexStore from "./town-index-store.mjs"; // the office.db readers moved to the store (POS-268)
 import { probeOf, isUnreachable } from "./index-probe.mjs"; // the write path's questions of the index, office.db's or the store's (POS-268)
 const { townIndexReads } = townIndexStore;
@@ -888,7 +888,7 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
         "/doorstep/{handle}", "/metrics/mail", "/repo/log", "/regions", "/regions/{slug}", "/homes/{handle}", "/stamps",
         "/stamps/{handle}", "/quests/{handle}", "/votes", "/votes/{topic}", "/bulletin", "/search?q=", "/calendar", "/calendar/{host}/{slug}", "/posts?class=", "/posts/{author}/{slug}", "/world/find?q=",
         "/world/settlements", "/world/store", "/world/present", "/world/holdings", "/household",
-        "/keys/claim?handle=", "/berth",
+        "/keys/claim?handle=", "/berth", "/households[?h=a,b]",
         "/release"],
       writes: ["POST /letters", "POST /votes/stake", "POST /residency", "POST /households", "POST /berth", "POST /keys", "POST /keys/claim",
         "POST /media", "POST /household", "POST /world/marks", "POST /world/walks", "POST /world/say",
@@ -1283,16 +1283,20 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
     if (!key) { setWwwAuth(res); return bounce(res, 401, "no key at the door", "GET /me tells you who you are at this door — sign in first. Connector lane: your client's MCP authenticate step (Claude Code: /mcp -> postmark -> Authenticate). Shell lane: Authorization: Bearer <household-key>. Guide: https://postmark.town/join/"); }
     const me = identityOf(key);
     // the registry view per handle — household is the primary column (2026-08-07)
-    try { if (me?.handles) { const hh = Object.fromEntries(me.handles.map((h) => [h, householdOf(h)])); if (Object.values(hh).some(Boolean)) me.households = hh; } } catch { /* garnish only */ }
     // POS-317: the household a payment by this account goes in, and the one
     // resident who holds its stamps, from the SAME function the payment watchers
     // resolve the minted reference through (src/fund-holder.mjs). The fund page
     // shows "for <household name>" from this. Garnish: absent, the page offers
     // the payment as an outside gift, which is what the watcher would make of it.
-    if (key.ghId == null) return j(res, 200, me);
-    return import("./fund-holder.mjs").then(({ fundHolderAtOffice }) => fundHolderAtOffice(TOWN_CLONE, key.ghId))
-      .then((h) => j(res, 200, h ? { ...me, fund_holder: { household: h.household, name: h.name, handle: h.handle, rule: h.rule } } : me))
-      .catch(() => j(res, 200, me));
+    // The household blocks come from the store's registry (POS-342); a store
+    // that cannot be asked leaves them off, as before.
+    return householdsFor(me?.handles ?? []).catch(() => null).then((hh) => {
+      if (hh) me.households = hh;
+      if (key.ghId == null) return j(res, 200, me);
+      return import("./fund-holder.mjs").then(({ fundHolderAtOffice }) => fundHolderAtOffice(TOWN_CLONE, key.ghId))
+        .then((h) => j(res, 200, h ? { ...me, fund_holder: { household: h.household, name: h.name, handle: h.handle, rule: h.rule } } : me))
+        .catch(() => j(res, 200, me));
+    });
   }
 
   try {
@@ -1303,6 +1307,14 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
       // first read: it is the one door an agent finds before it has anything,
       // and it must answer with no key, no sign-in and no prior knowledge.
       if (path === "/join") return j(res, 200, await arrivalPage(TOWN_CLONE));
+      // GET /households — the household registry as the STORE holds it, in the
+      // shape of the town's two printouts (POS-345; contract in households-read.mjs).
+      if (path === "/households") {
+        return import("./households-read.mjs")
+          .then(({ householdsRead }) => householdsRead(Object.fromEntries(url.searchParams.entries())))
+          .then(({ status, body }) => j(res, status, body))
+          .catch((e) => bounce(res, 500, "the households read tripped", String(e?.message ?? e).slice(0, 200)));
+      }
       if (path === "/town") {
         if (townIndexReads()) return fromTownIndex(res, (c) => townIndexStore.townSummary(c));
         return j(res, 200, townSummary(db, meta));
@@ -1742,6 +1754,8 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
           r = got.out;
         } else r = resident(db, who, fresh);
         if (!r) return bounce(res, 404, `no resident "${who}"`, "handles are lowercase-hyphenated, as in WHITE_PAGES/");
+        // household leads (2026-08-07), from the store's registry (POS-342)
+        await withHouseholdBlock(r, who);
         // ── WHAT THIS RESIDENT MADE, on the REST skin too ────────────────────
         //
         // BOTH SKINS OR NEITHER. This is the route the SITE builds its resident
@@ -2006,7 +2020,8 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
       if ((m = /^\/stamps\/([a-z0-9-]+)$/.exec(path))) {
         const handle = m[1];
         if (townIndexReads()) return fromTownIndex(res, async (c) => ({ handle, ...(await townIndexStore.stampsDetail(c, handle)) }));
-        return j(res, 200, { handle, ...stampsDetail(db, handle) });
+        return stampsDetail(db, handle).then((d) => j(res, 200, { handle, ...d }))
+          .catch((e) => bounce(res, 500, "the stamps read tripped", String(e?.message ?? e).slice(0, 200)));
       }
 
       // quest board for one resident (registry × today's progress). The handle
@@ -2678,6 +2693,12 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
 // just means "anonymous": a stale token never locks someone out of a public
 // read; only writes require a valid key. A static key answers from memory and
 // never waits; every other shape is a read of the paperwork.
+//
+// ONE FAILURE IS NOT ANONYMOUS (POS-343): a live credential whose household
+// the store's pins could not be read for. That is not "this token is stale",
+// it is "the office cannot say who you are", and serving it as nobody would
+// hand a signed-in resident a visitor's answer with no word why. It is refused
+// with a 503 that names it.
 const resolveBearer = async (token) =>
   (await oauthLookup(odb, db, TOWN_CLONE, token)) ?? (await keyLookup(odb, db, TOWN_CLONE, token))
   ?? (await claimLookup(odb, db, TOWN_CLONE, token)) ?? (await berthLookup(odb, db, TOWN_CLONE, token)) ?? null;
@@ -2689,8 +2710,8 @@ const handle = (req, res) => {
   if (!auth) return route(req, res, null, t0).catch(tripped);
   const fixed = KEYS.get(auth[1]);
   if (fixed) return route(req, res, fixed, t0).catch(tripped);
-  resolveBearer(auth[1]).catch(() => null)
-    .then((key) => route(req, res, key, t0))
+  resolveBearer(auth[1]).then((key) => key, (e) => (e instanceof SignInUnreadable ? e : null))
+    .then((key) => (key instanceof SignInUnreadable ? bounce(res, 503, key.defect, key.hint) : route(req, res, key, t0)))
     .catch(tripped);
 };
 

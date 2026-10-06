@@ -45,6 +45,23 @@ lawful AS (
     -- because a snapshot is written once and never moves.
     ('office_api',   'position_snapshots',     'INSERT'),
     ('office_api',   'position_snapshot_rows', 'INSERT'),
+    -- 054_world_snapshots.sql (POS-357, POS-337 R1). The computed World of a
+    -- snapshot, a cache built outside the clearing by the office on first read:
+    -- INSERT + DELETE and no UPDATE, because only the newest few are kept and a
+    -- fold is replaced, never edited.
+    ('office_api',   'world_snapshot_folds',   'INSERT'),
+    ('office_api',   'world_snapshot_folds',   'DELETE'),
+    -- 060_standing_acts.sql (POS-347). The Registrar's standing ledger as
+    -- store-of-record; INSERT only, because an act is never edited or removed
+    -- (a lift is a new row) and 060's trigger refuses UPDATE and DELETE.
+    ('office_api',   'standing_acts',          'INSERT'),
+    -- 061_crossing_receipts.sql (POS-352). Each decided crossing's receipt,
+    -- written once from the settlement unit's own office connection; INSERT
+    -- only, because a receipt is what a crossing said and never moves.
+    ('office_api',   'crossing_receipts',      'INSERT'),
+    -- 062_gangway_acts.sql (POS-353). The arrivals breaker as store-of-record;
+    -- INSERT only, because a change of state is a new row and never an edit.
+    ('office_api',   'gangway_acts',           'INSERT'),
     -- 019_households.sql. The household registry as store-of-record: the two
     -- town JSON files become a rendering of these tables. `office_api` because
     -- it is the role the door that DECLARES a household already connects as
@@ -135,6 +152,16 @@ lawful AS (
     ('clearing_job', 'windows',          'UPDATE'),
     ('clearing_job', 'marks',            'INSERT'),
     ('clearing_job', 'marks',            'UPDATE'),
+    -- 054_world_snapshots.sql (POS-357, POS-337 R1). The clearing seals the
+    -- World it leaves in its own transaction, a pure SQL copy; INSERT only,
+    -- because a version, a list and a header are written once and never move.
+    ('clearing_job', 'mark_versions',        'INSERT'),
+    ('clearing_job', 'world_snapshot_marks', 'INSERT'),
+    ('clearing_job', 'world_snapshots',      'INSERT'),
+    -- 064_snapshot_register.sql (POS-410). The register rows the snapshot was
+    -- sealed against, copied beside the marks; INSERT only, the same reason.
+    ('clearing_job', 'register_versions',       'INSERT'),
+    ('clearing_job', 'world_snapshot_register', 'INSERT'),
     ('law_ingester', 'law_projection',   'INSERT'),
     ('law_ingester', 'law_projection',   'DELETE'),
     ('law_ingester', 'stamp_projection', 'INSERT'),

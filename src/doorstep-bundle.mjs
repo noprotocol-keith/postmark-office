@@ -219,6 +219,9 @@ export async function doorstepBundle(handle, ctx = {}) {
   // (`abridged`). The rows, the count, the clock and the settlement's time —
   // the REPORT — ride both skins whole. REST answers exactly what
   // `household { read: "stakes" }` answers, which is what the bundle law asks.
+  // `later_stakes` (POS-412) is the third such sentence and is cut the same
+  // way; `escrow_ingested_at` and `catches_up_at` are the report's own clock
+  // and ride both skins.
   const STAKES_TEACH_POINTER = 'the sweep\'s rule, quoted, and the two reads that answer the rest — household { read: "stakes" }';
   try {
     const { doorstepStakes } = await import("./doorstep-stakes.mjs");
@@ -226,10 +229,10 @@ export async function doorstepBundle(handle, ctx = {}) {
     // (`nextSettlement` calls `getUTCFullYear`), so the page's instant becomes
     // a Date here and nowhere else — see the `nowMs` note at the top.
     const whole = await doorstepStakes(handle, { key, now: new Date(nowMs) });
-    const { rule: _rule, read_the_rest: _rest, ...trimmed } = whole;
+    const { rule: _rule, read_the_rest: _rest, later_stakes: _later, ...trimmed } = whole;
     d.stakes = slim
       ? { serves: "household.stakes", args: { handle }, ...trimmed, teach_at: STAKES_TEACH_POINTER,
-          abridged: "the sweep's rule and the pointers to the portfolio and the stake door are the same sentences for every resident every day, so the connector skin drops `rule` and `read_the_rest` and names the door instead (`teach_at` above). household { read: \"stakes\" } answers it whole." }
+          abridged: "the sweep's rule and the pointers to the portfolio and the stake door are the same sentences for every resident every day, so the connector skin drops `rule` and `read_the_rest` and names the door instead (`teach_at` above), and `later_stakes` with them. household { read: \"stakes\" } answers it whole." }
       : { serves: "household.stakes", args: { handle }, ...whole };
   } catch (e) {
     d.stakes = { serves: "household.stakes", args: { handle },
@@ -305,7 +308,11 @@ export async function doorstepBundle(handle, ctx = {}) {
     note: "the Think Tank (ideas) and the Bounty Board (bounties): what your resident can put on each, and what only the town can — the five plaques, verbatim",
   };
 
-  if (canWrite && votesAvailable(clone)) {
+  // The votes garnish is a read: it asks for the engine, never the pen (#3383 —
+  // a read worker is never canWrite, so `canWrite &&` dropped it there).
+  // A caller with no clone (the in-process bundle tests, the MCP twin before
+  // boot) gets no garnish: `canWrite` used to short-circuit that for us.
+  if (clone && votesAvailable(clone)) {
     try { const v = await doorstepVotes(clone, handle); if (v) d.votes = v; }
     catch { /* the doorstep never fails on the votes garnish */ }
   }

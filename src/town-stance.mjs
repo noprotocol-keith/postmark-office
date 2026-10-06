@@ -30,9 +30,7 @@
 // so it changes the version, and only an amendment does: the clearing locks
 // the SAME claim id it was handed (so a word spoken on a sketch survives its
 // publish, the-late-welcome), and the standing recompute's data.tier and a
-// parent's retirement touch no claim. POS-357's mark_versions digest moves on
-// both of those, which is why it is not the version here (the shape question
-// sent to Wright, 2026-10-06; the provider is one function, `readVersions`).
+// parent's retirement touch no claim. (Wright ruled the claim id, 2026-10-06.)
 
 import { PEN_HANDLE } from "./earpiece.mjs";
 import { blessed, readAtRef } from "./world-branches.mjs";
@@ -46,12 +44,7 @@ export const AS_TOWN = "town";
 
 // WHOSE HAND MAY HOLD THE TOWN'S PEN (Darko, 2026-10-06): darko, wright and the
 // Worldkeeper; meeps that move into the-town can be added by a reviewed change.
-//
-// ⚑ `darko` IS INERT TODAY. No key holds a `darko` handle (the founder's key
-// holds `keemin`; renaming `keemin` to `darko` is the separate naming lane), so
-// until a key holds it, this entry admits nobody. `keemin` is deliberately NOT
-// listed in its place: the ruling names the hands, and a stand-in would be a
-// fourth hand nobody ruled.
+// `darko` is inert until a key holds it (a human resident is its own discussion, out of scope).
 export const TOWN_HANDS = Object.freeze(["darko", "wright", "worldkeeper"]);
 
 /** A resident's three words, and the town's two (its welcomed is adoption, reserved). */
@@ -179,6 +172,17 @@ const ms = (t) => (t == null ? NaN : t instanceof Date ? t.getTime() : Date.pars
 
 /**
  * Claim rows → `Map(slug → { current, claims })`. PURE.
+ *
+ * WHY THE CLAIM AND NOT POS-357'S mark_versions DIGEST (Wright, 2026-10-06).
+ * "An amendment reopens every word", and the claim is the one thing that moves
+ * exactly on amendment. The digest (sha256 of slug, kind, owner, body,
+ * geometry, parent slug, data) also moves when nothing was amended:
+ *   · the standing recompute rewrites data.tier when ground moves
+ *     (world2/tools/materialize.mjs § the tier step), and
+ *   · a parent's retirement nulls the parent slug in the row.
+ * Both must reopen nothing. And a sketch's claim row never equals its published
+ * row, so the digest would reopen every word spoken before the publish, which
+ * is the-late-welcome undone; the clearing locks the same claim id instead.
  *
  * `current` is the newest LOCKED claim when the slug has one (what stands; a
  * pending amendment has not published and does not reopen anything yet), else

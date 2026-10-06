@@ -92,6 +92,8 @@ const MAIN_SHA = git("rev-parse", "HEAD").trim();
 // answer is computed from CLAIMS by the real SQL's own predicate, so a test
 // that amends a mark does it by adding a claim, the way the store does.
 let CLAIMS = [];
+// The live layer: drafts the stance credential sees (023's carve). Empty unless a test plants one.
+let LIVE = [];
 const claim = (slug, id, { status = "locked", window_id = 10, at = "2026-08-20T00:00:00Z" } = {}) =>
   ({ slug, id, status, window_id, submitted_at: at, decided_at: status === "locked" ? at : null });
 const stancePool = {
@@ -100,7 +102,7 @@ const stancePool = {
       const slugs = new Set(params[0]), statuses = new Set(params[1]);
       return { rows: CLAIMS.filter((c) => slugs.has(c.slug) && statuses.has(c.status)) };
     }
-    if (/FROM claims\s+WHERE status = ANY\(\$1\)/.test(text)) return { rows: [] };
+    if (/FROM claims\s+WHERE status = ANY\(\$1\)/.test(text)) return { rows: LIVE.filter((r) => params[0].includes(r.status)) };
     throw new Error(`the stance pool stub does not answer: ${text.slice(0, 80)}`);
   },
   async end() {},
@@ -122,6 +124,7 @@ beforeEach(() => {
   pen = installActsPen();
   resetStanceGeometry();
   CLAIMS = [claim("beta/on-alphas-edge", "c-beta-1"), claim("alpha/alphas-parcel", "c-alpha-1")];
+  LIVE = [];
 });
 after(() => {
   for (const k of ["WORLD_SINGLE_LOG", "WORLD2_STANCE_URL", "WORLD2_PG", "WORLD2_PG_URL", "W2_LATE_ARRIVAL"]) delete process.env[k];
@@ -247,6 +250,51 @@ test("4 · every stance records the version it was spoken on, and an amendment r
   const legacy = { class: CLASS_STANCE, object: "beta/on-alphas-edge", actor: "alpha", payload: { stance: "opposed" }, written_at: "2026-08-25T00:00:00Z", seq: 9 };
   assert.equal(versionAt(versionsFromRows(CLAIMS).get("beta/on-alphas-edge"), legacy.written_at), "c-beta-1");
   assert.deepEqual(standingStances([legacy], { versions: versionsFromRows(CLAIMS) }), [], "so the amendment reopens it too");
+});
+
+// ── 4b · a word written before versions were recorded ───────────────────────
+// FLIP: read a row with no recorded version as unknown (rowVersion → null) →
+// the pre-change word survives the amendment.
+
+test("4b · a pre-change word reads as spoken on the claim current at its instant: it stands until an amendment, then it is absent", () => {
+  // Wright, 2026-10-06 (b): "A legacy row with no version reads as spoken on
+  // the claim current at its instant, derived from claims."
+  const legacy = [
+    { class: CLASS_STANCE, object: "beta/on-alphas-edge", actor: "alpha", payload: { stance: "opposed" }, written_at: "2026-08-25T00:00:00Z", seq: 9 },
+    { class: CLASS_STANCE, object: "beta/on-alphas-edge", actor: TOWN_SPEAKER, payload: { stance: "opposed", as: "town" }, written_at: "2026-08-26T00:00:00Z", seq: 10 },
+  ];
+  const before = versionsFromRows(CLAIMS);
+  assert.deepEqual(standingStances(legacy, { versions: before }).map((s) => s.by).sort(), ["alpha", TOWN_SPEAKER],
+    "with no amendment since, both pre-change words stand");
+  assert.deepEqual([...townWordsOf(legacy, { versions: before })], [["beta/on-alphas-edge", "opposed"]]);
+
+  const after = versionsFromRows([...CLAIMS, claim("beta/on-alphas-edge", "c-beta-2", { window_id: 12, at: "2026-09-01T00:00:00Z" })]);
+  assert.deepEqual(standingStances(legacy, { versions: after }), [], "after an amendment, the pre-change words are absent");
+  assert.equal(townWordsOf(legacy, { versions: after }).size, 0, "the town's too");
+});
+
+// ── 4c · the town speaks only on published marks ────────────────────────────
+// FLIP: let the town's arm find unpublished marks → the town's word on a
+// household's draft is written.
+
+test("4c · the town speaks only on PUBLISHED marks: a draft is its household's own, and the refusal says so", async () => {
+  // Wright, 2026-10-06 (c): "A draft is its household's own (private drafts
+  // live at the world door), and a town that read drafts through the stance
+  // carve would breach that. Refuse with a sentence that says so."
+  LIVE = [{ slug: "beta/a-private-sketch", claimant: "beta", status: "draft", at: { x: 104, y: 100 }, extent: { w: 2, h: 2 }, kind: "sited", date: "2026-09-02", declared_by: "beta" }];
+  for (const on of ["beta/a-private-sketch", "beta/no-such-mark"]) {
+    await assert.rejects(() => speak({ as: "town", on, stance: "opposed", law: ["the-town/the-unmoved-past"] }, wright), (e) => {
+      assert.equal(e.code, 404);
+      assert.equal(e.defect, `no published mark "${on}"`, "one answer for a draft and for nothing: the refusal never says which");
+      assert.match(e.hint, /a draft is its household's own until it publishes/);
+      assert.match(e.hint, /waits for the publish/);
+      return true;
+    });
+  }
+  assert.equal(written().length, 0, "nothing was written");
+  // The same draft is still a resident's candidate (the-late-welcome), so the
+  // stub really does hold it.
+  assert.ok((await stanceInbox(repo, alpha)).candidates.some((c) => c.mark === "beta/a-private-sketch"));
 });
 
 // ── 5 · who a mark awaits: households, seniority, one function ──────────────

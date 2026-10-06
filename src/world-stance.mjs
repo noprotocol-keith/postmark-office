@@ -1356,8 +1356,11 @@ async function declareTownStance(repo, args, key, { dbPath = null, crossing = nu
   const world = await worldForStances(repo, { dbPath });
   if (world.unreachable) throw bounce(503, "the stance candidate list could not be read", world.unreachable);
   const target = world.marks.find((m) => m.id === on && m.published !== false);
+  // ONE ANSWER FOR "NO SUCH MARK" AND "NOT PUBLISHED" (Wright, 2026-10-06, (c)):
+  // a draft is its household's own, and a town that read drafts through the
+  // stance carve would breach that, so this refusal never says which it was.
   if (!target) throw bounce(404, `no published mark "${on}"`,
-    "the town speaks on what has published: silence publishes, and the town's word follows it. A sketch is its author's until it publishes.");
+    "the town speaks only on published marks: a draft is its household's own until it publishes, and the town does not read drafts. Silence publishes; an opposition to something not yet published waits for the publish and then returns it through the return path. Nothing was written.");
 
   const lawSha = townDeps.lawSha ?? await lawShaFor(repo, { query: townDeps.lawQuery ?? storeQuery });
   let lawMarks = townDeps.lawMarks;

@@ -216,6 +216,28 @@ export function bulletinRows(town) {
  */
 export const OFFICE_DOCS = Object.freeze(["STAMPS.md"]);
 
+/** The names `town { read: "docs" }` takes as `doc:`, each a key of the docs value lowercased. */
+export const DOC_NAMES = Object.freeze(["readme", "joining", "town-rules", "mail", "contributing", "stamps"]);
+
+/**
+ * `town { read: "docs" }`'s answer, shaped from the ONE docs value that GET
+ * /town/docs serves (`{ as_of, docs }`, from either index). Bare, the listing:
+ * each doc's name, path and size, never a body, so the bare read stays cheap.
+ * With `doc`, that one doc whole. Null when the index holds no such doc (an
+ * index that predates it, or a town without the file).
+ */
+export function docsAnswer({ as_of = null, docs = {} } = {}, doc = null) {
+  if (doc == null || doc === "") {
+    return {
+      as_of,
+      docs: Object.entries(docs).map(([k, d]) => ({ doc: k.toLowerCase(), path: d.path, chars: d.body?.length ?? 0 })),
+      open: 'args: { doc: "<name>" } answers one doc whole — doc: "stamps" is what stamps are and how they move',
+    };
+  }
+  const d = docs[String(doc).toUpperCase()];
+  return d ? { as_of, doc: String(doc).toLowerCase(), path: d.path, body: d.body } : null;
+}
+
 /** The town's docs as one meta value: `{ README: { body, path }, … }`, keys sorted, JSON. */
 export const townDocsValue = (town, TOWN) => {
   const docs = { ...(town.docs ?? {}) };

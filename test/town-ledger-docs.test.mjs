@@ -129,10 +129,46 @@ test("STAMPS.md: household { read: \"stamps\" } points at the explainer the docs
   const ix = { stampsDetail: async () => ({}), questBoard: async () => null };
   const r = await estateRead({ household: "rei", handles: new Set(["rei"]) }, { clone: dir, ix });
   assert.match(r.explainer, /STAMPS\.md/, "the stamps read names the explainer");
-  assert.match(r.explainer, /GET \/town\/docs as docs\.STAMPS/, "and where it is served");
+  assert.match(r.explainer, /town \{ read: "docs", args: \{ doc: "stamps" \} \}/, "and the MCP read that answers it");
+  assert.match(r.explainer, /GET \/town\/docs serves it as docs\.STAMPS/, "and the REST door");
   const docs = JSON.parse(townDocsValue(readTown(dir), dir));
   assert.equal(docs.STAMPS?.path, "STAMPS.md", "the key the pointer names is one the docs door serves");
   assert.equal(docs.STAMPS.body, "# Stamps\n\nThe town's currency.", "frontmatter stripped as the reader strips");
+});
+
+test("town { read: \"docs\" }: the MCP reaches the docs, from the index's one docs value", async () => {
+  const dir = town();
+  const dbPath = join(dir, "..", `office-docs-${Date.now()}.db`);
+  trash.push(dbPath);
+  const h = spawnSync(process.execPath, [join(ROOT, "src", "hydrate.mjs"), "--town", dir, "--db", dbPath], { encoding: "utf8" });
+  assert.equal(h.status, 0, h.stderr);
+  const { callTool } = await import("../src/mcp.mjs");
+  const { TOWN_READABLE } = await import("../src/town-apex.mjs");
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const meta = { as_of: docsFromDb(db).as_of };
+    const ctx = { db, key: null, meta, asOf: meta.as_of, canWrite: false, clone: null };
+    const town = (args) => callTool("town", args, ctx);
+    assert.ok(TOWN_READABLE.includes("docs"), "the town door names the read");
+
+    // the pointer the stamps read carries is the call that answers it
+    const one = await town({ read: "docs", args: { doc: "stamps" } });
+    const served = docsFromDb(db);
+    assert.deepEqual(one, { as_of: served.as_of, doc: "stamps", path: "STAMPS.md", body: served.docs.STAMPS.body },
+      "STAMPS whole, the same body GET /town/docs serves");
+    assert.deepEqual(await town({ read: "docs", doc: "stamps" }), one, "from the top level too");
+
+    const bare = await town({ read: "docs" });
+    assert.deepEqual(bare.docs.map((d) => d.doc), ["joining", "readme", "stamps", "town-rules"], "bare: the listing");
+    assert.equal(bare.docs.some((d) => "body" in d), false, "never a body on the listing");
+    assert.equal(bare.docs.find((d) => d.doc === "stamps").chars, served.docs.STAMPS.body.length);
+
+    const absent = await town({ read: "docs", args: { doc: "mail" } });
+    assert.equal(absent.error, "bounce", "a named doc the town lacks is refused, never an empty body");
+    const bad = await town({ read: "docs", args: { doc: "ledger" } });
+    assert.equal(bad.code, 422);
+    assert.match(bad.defect, /must be one of: readme, joining, town-rules, mail, contributing, stamps/);
+  } finally { db.close(); }
 });
 
 test("an index that predates the docs key answers an empty docs object, never a throw", () => {

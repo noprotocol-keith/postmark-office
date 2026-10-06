@@ -45,7 +45,7 @@ lawful AS (
     -- because a snapshot is written once and never moves.
     ('office_api',   'position_snapshots',     'INSERT'),
     ('office_api',   'position_snapshot_rows', 'INSERT'),
-    -- 064_stamp_lines.sql (POS-341 Q1). The stamp ledger's signed chain, one row
+    -- 066_stamp_lines.sql (POS-341 Q1). The stamp ledger's signed chain, one row
     -- per line, appended by the pen in its act's transaction; INSERT only,
     -- because a signed line is never rewritten.
     ('office_api',   'stamp_lines',            'INSERT'),
@@ -191,7 +191,7 @@ lawful AS (
     ('law_ingester', 'town_funding_invalid',       'INSERT'),
     ('law_ingester', 'town_funding_invalid',       'DELETE'),
     ('law_ingester', 'town_index_snapshots',       'INSERT'),
-    -- 065_town_mint_inputs.sql (POS-341): the mint's rooms and mail lines, read
+    -- 067_town_mint_inputs.sql (POS-341): the mint's rooms and mail lines, read
     -- from git by the town-index ingest; replaced, never edited.
     ('law_ingester', 'town_rooms',                 'INSERT'),
     ('law_ingester', 'town_rooms',                 'DELETE'),

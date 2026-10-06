@@ -838,7 +838,10 @@ export async function stanceInbox(repo, key, { dbPath = null, versionDeps = {} }
   const words = standingStances(rows, { versions: read.versions });
   const standing = words.filter((s) => mineHandles.has(s.by));
 
-  return { candidates: candidatesFrom({ mine, all, overlaps, householdOf, households: myHouses, words }), standing, mine: mine.map((m) => m.id),
+  // WHOSE GROUND THE NUMBER COUNTED, now that it is the house's: a resident's
+  // own only while every mark counted is theirs, else the household's.
+  const scope = mine.every((m) => mineHandles.has(m.by)) ? stancesGround(mineHandles) : "household";
+  return { candidates: candidatesFrom({ mine, all, overlaps, householdOf, households: myHouses, words }), standing, mine: mine.map((m) => m.id), scope,
     // Carried for the set-down group (`stanceShadow`'s `setDowns`), which needs
     // the same world and the same stance rows — never a second read of either.
     // Nothing renders these two keys; the shadow names every field it answers.
@@ -920,7 +923,7 @@ export async function stancesBlock(repo, key, { spine = [], dbPath = null } = {}
   try {
     if (!handlesOf(key).size) return null;
     const inbox = await stanceInbox(repo, key, { dbPath });
-    const ground = stancesGround(handlesOf(key));
+    const ground = inbox.scope ?? stancesGround(handlesOf(key));
     if (inbox.unavailable) return { stances_awaiting: 0, unavailable: inbox.unavailable };
     const n = inbox.candidates.length;
     const mine = new Set(inbox.mine);
@@ -1010,7 +1013,7 @@ export async function stanceShadow(repo, key, { cursor = null, limit = PAGE_SIZE
   return {
     stances_awaiting: inbox.candidates.length,
     // WHOSE GROUND THAT NUMBER COUNTED — see § WHOSE GROUND THIS NUMBER COUNTED.
-    stances_awaiting_ground: stancesGround(key?.handles),
+    stances_awaiting_ground: inbox.scope ?? stancesGround(key?.handles),
     awaiting: page,
     cursor: next,
     // Said out loud rather than left to be inferred from a short page — the same

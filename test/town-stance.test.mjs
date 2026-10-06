@@ -275,6 +275,7 @@ test("5 · awaiting is grouped by household, with seniority, and the inbox reads
   const labelled = [...labels].filter(([, who]) => who.includes("hh:alpha")).map(([id]) => id).sort();
   const inbox = await stanceInbox(repo, alpha);
   assert.deepEqual(inbox.candidates.map((c) => c.mark).sort(), labelled);
+  assert.equal(inbox.scope, "household", "and the number says whose ground it counted: the house's, alpha2's cairn included");
   const pure = candidatesFrom({ mine: marks.filter((m) => householdOf(m.by) === "hh:alpha"), all: marks, overlaps, householdOf });
   assert.deepEqual(pure.map((c) => c.mark).sort(), labelled);
 

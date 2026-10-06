@@ -211,6 +211,8 @@ const ROSTER = {
   // Behind its entry guard since 2026-10-05 (POS-406): no --world-repo stops on
   // usage before any git read or Postgres connect.
   "world2/tools/falsifier-standing-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-standing-equality.mjs" },
+  // Read only (POS-404): no WORLD2_PG_URL stops before any Postgres connect.
+  "world2/tools/stranded-claims.mjs": { args: [], env: NO_PG, code: 2, needle: "WORLD2_PG_URL missing" },
   // No --base: stops on usage before any HTTP (POS-142).
   "world2/tools/falsifier-twins-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-twins-equality.mjs" },
   // Behind its entry guard since 2026-10-01 (POS-142 S3): no --world-repo stops

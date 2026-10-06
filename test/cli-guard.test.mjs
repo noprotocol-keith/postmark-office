@@ -158,6 +158,8 @@ const ROSTER = {
   "tools/registry-backfill.mjs": { args: [], env: NO_PG, code: 1, needle: "pass exactly one of --dry-run or --apply" },
   "tools/registry-drain.mjs": { args: [], env: NO_PG, code: 1, needle: "pass exactly one of --check, --apply or --ingest-missing" },
   "tools/standing-drain.mjs": { args: [], env: NO_PG, code: 2, needle: "pass exactly one of --check or --apply" },
+  "world2/tools/crossing-receipt.mjs": { args: [], env: NO_PG, code: 2, needle: "--receipt <settlement-auto.json> is required" },
+  "tools/gangway-drain.mjs": { args: [], env: NO_PG, code: 2, needle: "pass exactly one of --check or --apply" },
   "tools/registry-seed.mjs": { args: [], env: NO_PG, code: 1, needle: "pass exactly one of --dry-run or --apply" },
   // POS-193 (fix-forward, 2026-09-23): the baseline tool refuses at its first gate
   // when the named tip cannot be resolved — before any gh call and before the
@@ -206,6 +208,9 @@ const ROSTER = {
   "world2/tools/falsifier-pen-flip.mjs": { args: ["--help"], env: NO_PG, code: 0, needle: "usage" },
   "world2/tools/falsifier-projection-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-projection-equality.mjs" },
   "world2/tools/falsifier-review-closure.mjs": { args: [], env: NO_PG, code: 2, needle: "WORLD2_PG_URL missing" },
+  // Behind its entry guard since 2026-10-05 (POS-406): no --world-repo stops on
+  // usage before any git read or Postgres connect.
+  "world2/tools/falsifier-standing-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-standing-equality.mjs" },
   // Read only (POS-404): no WORLD2_PG_URL stops before any Postgres connect.
   "world2/tools/stranded-claims.mjs": { args: [], env: NO_PG, code: 2, needle: "WORLD2_PG_URL missing" },
   // No --base: stops on usage before any HTTP (POS-142).
@@ -246,6 +251,7 @@ const ROSTER = {
   "world2/tools/seed-import.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: seed-import.mjs" },
   // No --world-repo: stops on usage before any git or Postgres (postmark#2897).
   "world2/tools/settlements-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "--world-repo <checkout> is required" },
+  "world2/tools/snapshot-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: snapshot-backfill.mjs --world-repo <clone> --town-repo <clone>" },
   "world2/tools/snapshot-export.mjs": { args: ["--help"], env: NO_PG, code: 2, needle: "usage:" },
   "world2/tools/stamp-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: stamp-ingest.mjs" },
   "world2/tools/town-index-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: town-index-ingest.mjs" },

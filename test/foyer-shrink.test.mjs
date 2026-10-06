@@ -287,6 +287,15 @@ test('F5 · OPERATIONS.md: "REST: stable/simple for frozen consumers" — the RE
   // stamps preview is live — pass preview: true to any stake and read what it
   // would do before it does it."
   //
+  // ⚑ REGENERATED 2026-10-04 FOR POS-317's follow-up (office #333, Darko's go):
+  // the fund-verify card gained `household` (the account the w41 fund page
+  // sends; without it both doors 422'd the page). ADDITIVE and proven so: the
+  // capture diff added exactly `/acts/11/fields/household/{type,description}`
+  // and removed or retyped none. The connector's answer stays under its
+  // ceiling because fund-verify's own teaching line was tightened in the same
+  // act. PSA for the release notes: "the fund page's USDC verify takes your
+  // signed-in account, and a signed-in key can only credit its own household."
+  //
   // This is the WITNESS the regeneration would otherwise have no room for, and
   // it is positional-independent on purpose: the stake act is found by the one
   // field only it carries, so a reordering of the acts list cannot make it pass
@@ -818,6 +827,24 @@ test("F7c5 · THE MORNING PAGE DID NOT FATTEN — the doorstep bundle is byte-id
   //
   // Both skins move identically: `posts` has no teaching block to cut, so it
   // rides the connector whole, the way `stakes`' rows do.
+  //
+  // ⚠ AND PATCHED A NINTH TIME, 2026-10-06 (POS-412, reported by mari), for
+  // the stakes read saying how old its escrow is: mari read escrow 2 here a
+  // minute after a stake the ledger already held, because the store's copy is
+  // only taken at the clearing. Not re-captured: the lane's tree carried a
+  // dynamic.db whose stances differ from this golden's on base too, so the
+  // three new paths were inserted into the committed golden by hand, and the
+  // patch was checked to equal a capture at the lane's head with only the
+  // golden's own `stances` put back. The leaf diff: NONE removed; added
+  // `full.stakes.escrow_ingested_at`, `.catches_up_at`, `.later_stakes`, and
+  // on slim the first two; changed `slim.stakes.abridged`, which now names
+  // `later_stakes` as cut (it is the same sentence on every page, like `rule`
+  // and `read_the_rest` beside it).
+  //
+  // Measured from the file (residual 0):
+  //
+  //   full  19754 -> 19992 (+238, +1.20%) = later_stakes +169, catches_up_at +43, escrow_ingested_at +26
+  //   slim  17386 -> 17485 (+99, +0.57%)  = catches_up_at +43, abridged +30, escrow_ingested_at +26
   //
   // So the assertion below is the one that actually carries the promise, and it
   // is stated separately so a future regeneration cannot quietly absorb a card:

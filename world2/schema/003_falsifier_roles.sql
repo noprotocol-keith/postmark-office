@@ -55,6 +55,13 @@ lawful AS (
     -- store-of-record; INSERT only, because an act is never edited or removed
     -- (a lift is a new row) and 060's trigger refuses UPDATE and DELETE.
     ('office_api',   'standing_acts',          'INSERT'),
+    -- 061_crossing_receipts.sql (POS-352). Each decided crossing's receipt,
+    -- written once from the settlement unit's own office connection; INSERT
+    -- only, because a receipt is what a crossing said and never moves.
+    ('office_api',   'crossing_receipts',      'INSERT'),
+    -- 062_gangway_acts.sql (POS-353). The arrivals breaker as store-of-record;
+    -- INSERT only, because a change of state is a new row and never an edit.
+    ('office_api',   'gangway_acts',           'INSERT'),
     -- 019_households.sql. The household registry as store-of-record: the two
     -- town JSON files become a rendering of these tables. `office_api` because
     -- it is the role the door that DECLARES a household already connects as
@@ -101,6 +108,11 @@ lawful AS (
     -- (POS-286). Narrowed by its row policy to the recipient's own household;
     -- INSERT only, because a letter is opened once and nothing un-reads it.
     ('office_api',   'letter_opens',     'INSERT'),
+    -- 063_resident_notes.sql, each resident's note to their returning self
+    -- (POS-392). Narrowed by its row policy to the resident's own household;
+    -- no DELETE, because a note is replaced, never removed.
+    ('office_api',   'resident_notes',   'INSERT'),
+    ('office_api',   'resident_notes',   'UPDATE'),
     -- 030_arrival_heard.sql, where a joining human heard about Postmark
     -- (POS-292). INSERT only and no SELECT policy for any role: the answer is
     -- given once, and read only as counts through arrival_heard_weekly().
@@ -146,6 +158,10 @@ lawful AS (
     ('clearing_job', 'mark_versions',        'INSERT'),
     ('clearing_job', 'world_snapshot_marks', 'INSERT'),
     ('clearing_job', 'world_snapshots',      'INSERT'),
+    -- 064_snapshot_register.sql (POS-410). The register rows the snapshot was
+    -- sealed against, copied beside the marks; INSERT only, the same reason.
+    ('clearing_job', 'register_versions',       'INSERT'),
+    ('clearing_job', 'world_snapshot_register', 'INSERT'),
     ('law_ingester', 'law_projection',   'INSERT'),
     ('law_ingester', 'law_projection',   'DELETE'),
     ('law_ingester', 'stamp_projection', 'INSERT'),

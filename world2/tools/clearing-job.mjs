@@ -63,6 +63,9 @@ import { escrowAbsentAmong, escrowPresenceAt, escrowLines } from "./escrow-prese
 import { parcelCapLawAt, parcelCapRefusals, parcelCapLines, heldParcelsByCred, credOf, soloCountedAt, countingSolo } from "./parcel-cap.mjs";
 import { houseRowsVia, resolveHouse } from "../../src/household-deriver.mjs";
 import { computeStanding, gistContainment } from "./standing.mjs";
+// THE SEAL (POS-357, R1): a pure SQL copy of the World this window leaves, in
+// this transaction. The module imports nothing; see its header and step 8.
+import { sealSnapshot } from "./world-snapshot-seal.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (n) => { const i = process.argv.indexOf(n); return i === -1 ? null : process.argv[i + 1]; };
@@ -480,6 +483,26 @@ try {
   const { standing, moved, notes, containment: containmentSeen } = await recomputeStanding(q);
   for (const n of notes) console.log(`  ⚑ standing: ${n}`);
 
+  // 8 · THE SEAL — the World this window leaves, copied into the store's
+  //     snapshot tables in THIS transaction (054_world_snapshots.sql).
+  //
+  //     RULED (Darko, 2026-10-04, POS-337 R1): "Each 12-hour clearing writes a
+  //     content-addressed snapshot of every standing mark in the same transaction
+  //     that writes the marks, so the two can never disagree." And ("Agreed on
+  //     2"): the step is a PURE SQL COPY of the rows the clearing just wrote. No
+  //     engine, no fold, no files; the computed World is built outside, later.
+  //
+  //     AFTER STEP 7, because step 7 is the window's last write to `marks` (it
+  //     moves `data.tier`, which the fold reads), so the copy is of the register
+  //     as the window leaves it. A failed seal throws like any other step and the
+  //     window rolls back whole: a clearing without its snapshot does not happen.
+  //
+  //     AND THE HOUSEHOLD REGISTER BESIDE IT (POS-410, 064; Darko 2026-10-05:
+  //     the snapshot keeps the atomic upstream sources). The register rows as
+  //     they stand at the seal, so a past World folds with the past's houses.
+  const sealed = await sealSnapshot(q, { windowId });
+  console.log(`  ⚑ snapshot: ${sealed.marks} standing mark(s), ${sealed.new_versions} new version(s), register ${sealed.register_rows} row(s) (${sealed.new_register_versions} new), digest ${sealed.digest.slice(0, 12)}`);
+
   // Close, pin, open the successor.
   //
   // `receipts` is REPLACED, so anything already written there has to be carried
@@ -507,6 +530,8 @@ try {
       // ground has to name the law-as-of it refused against.
       ...(capSeen ? { parcel_cap: capSeen } : {}),
       ...(revived.length ? { revived } : {}),
+      // The seal's own account: which snapshot this window wrote.
+      snapshot: { id: sealed.id, digest: sealed.digest, marks_digest: sealed.marks_digest, marks: sealed.marks, new_versions: sealed.new_versions, register_digest: sealed.register_digest, register_rows: sealed.register_rows },
       standing: {
         recomputed: standing.length, moved: moved.length,
         // Capped, because the receipt is evidence and not an export: the first

@@ -46,6 +46,21 @@ trap 'rm -rf "$SNAP"' EXIT
   node /srv/postmark-office/deploy/settle-pass.mjs \
       --town "$TOWN_CLONE" --cursor /srv/postmark-office/settle-pass.cursor \
     || echo "[office-keep] settle pass FAILED (non-fatal) — the lines above name why; the next tick asks again from the same cursor" >&2
+  # standing-on-tick (POS-347, 2026-10-04): the standing ledger is a store
+  # table now (standing_acts, 060) and tools/standing-ledger.md its export. The
+  # drain adopts any line committed to the file by hand (the store reads git),
+  # then renders the file from the store and commits it only when it differs.
+  # The Registrar's door renders in its own act; this catches a hand line, and
+  # a door act whose push was lost. NON-FATAL: the doors read the store, not the
+  # file, so a drain that cannot run leaves only the export (the witness's copy)
+  # one tick behind, and the next tick asks again.
+  node /srv/postmark-office/tools/standing-drain.mjs --apply --clone "$TOWN_CLONE" \
+    || echo "[office-keep] standing drain FAILED (non-fatal) — the line above names why; the doors read the store and are unaffected" >&2
+  # gangway-on-tick (POS-353): the same shape for HARBOR/GANGWAY.md — a
+  # founder commit to the file is adopted, then the file is rendered from the
+  # store. Non-fatal: every arrival road reads the store, not the file.
+  node /srv/postmark-office/tools/gangway-drain.mjs --apply --clone "$TOWN_CLONE" \
+    || echo "[office-keep] gangway drain FAILED (non-fatal) — the line above names why; the arrival roads read the store and are unaffected" >&2
   # mint-on-tick (2026-08-06): a MANUAL crossing delivers without minting (the
   # key is box custody), opening an owed-window that used to last until the
   # next automated crossing — and a settlement landing inside it refuses

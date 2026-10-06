@@ -157,6 +157,9 @@ const ROSTER = {
   // indistinguishable from the correct answer on today's town (0 planned).
   "tools/registry-backfill.mjs": { args: [], env: NO_PG, code: 1, needle: "pass exactly one of --dry-run or --apply" },
   "tools/registry-drain.mjs": { args: [], env: NO_PG, code: 1, needle: "pass exactly one of --check, --apply or --ingest-missing" },
+  "tools/standing-drain.mjs": { args: [], env: NO_PG, code: 2, needle: "pass exactly one of --check or --apply" },
+  "world2/tools/crossing-receipt.mjs": { args: [], env: NO_PG, code: 2, needle: "--receipt <settlement-auto.json> is required" },
+  "tools/gangway-drain.mjs": { args: [], env: NO_PG, code: 2, needle: "pass exactly one of --check or --apply" },
   "tools/registry-seed.mjs": { args: [], env: NO_PG, code: 1, needle: "pass exactly one of --dry-run or --apply" },
   // POS-193 (fix-forward, 2026-09-23): the baseline tool refuses at its first gate
   // when the named tip cannot be resolved — before any gh call and before the
@@ -190,6 +193,8 @@ const ROSTER = {
   "deploy/welcome-pass.mjs": { args: [], code: 1, needle: "--town <town-clone> is required" },
   "deploy/settle-pass.mjs": { args: [], code: 1, needle: "--town <town-clone> is required" },
   "tools/rekey-household.mjs": { args: [], code: 1, needle: "--from <slug> --to <slug> --name" },
+  // --help: the usage line, before any clone, key or Postgres (a bare run builds the whole sandbox).
+  "tools/stamp-sandbox.mjs": { args: ["--help"], code: 0, needle: "usage: node tools/stamp-sandbox.mjs" },
   // world2/tools/
   // No --world-repo: stops on usage before any git read or Postgres connect (POS-212).
   "world2/tools/adopt-solo.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: adopt-solo.mjs" },
@@ -241,6 +246,7 @@ const ROSTER = {
   "world2/tools/seed-import.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: seed-import.mjs" },
   // No --world-repo: stops on usage before any git or Postgres (postmark#2897).
   "world2/tools/settlements-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "--world-repo <checkout> is required" },
+  "world2/tools/snapshot-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: snapshot-backfill.mjs --world-repo <clone> --town-repo <clone>" },
   "world2/tools/snapshot-export.mjs": { args: ["--help"], env: NO_PG, code: 2, needle: "usage:" },
   "world2/tools/stamp-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: stamp-ingest.mjs" },
   // POS-341: the mint from the store. Each stops before any store or clone is read.

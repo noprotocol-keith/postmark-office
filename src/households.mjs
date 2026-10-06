@@ -28,6 +28,16 @@
 // mint under on a date" is a different question with a date in it; it stays
 // the sealed ledger's (POS-341), and nothing here answers it.
 //
+// ONE HOUSE, WHICHEVER SPELLING IT WEARS (the Starling House, 2026-09-30). The
+// ledger can spell one house two ways at once (kinofire `hh:house-of-many-doors`,
+// the three PR-joined housemates `gh:334016343`); grouped by that spelling, the
+// publish note told kinofire the house's own parcel was another household's
+// ground. The w41 hotfix grouped the clone's answer by the resolved house and
+// carried it as `house` beside the ledger's `key`. Here there is no ledger
+// spelling to carry: `key` IS the house (`hh:<slug>`) and `residents` is the
+// house's own row, so every housemate answers the same block by construction,
+// and `world-hold.mjs § sameHousehold`'s `house ?? key` reads the house.
+//
 // ── ASYNC AT THE CALLER, SYNC IN THE LADDER ─────────────────────────────────
 //
 // The store read is async, and several readers ask it inside a synchronous

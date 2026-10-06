@@ -209,6 +209,9 @@ const ROSTER = {
   "world2/tools/falsifier-pen-flip.mjs": { args: ["--help"], env: NO_PG, code: 0, needle: "usage" },
   "world2/tools/falsifier-projection-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-projection-equality.mjs" },
   "world2/tools/falsifier-review-closure.mjs": { args: [], env: NO_PG, code: 2, needle: "WORLD2_PG_URL missing" },
+  // Behind its entry guard since 2026-10-05 (POS-406): no --world-repo stops on
+  // usage before any git read or Postgres connect.
+  "world2/tools/falsifier-standing-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-standing-equality.mjs" },
   // No --base: stops on usage before any HTTP (POS-142).
   "world2/tools/falsifier-twins-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: falsifier-twins-equality.mjs" },
   // Behind its entry guard since 2026-10-01 (POS-142 S3): no --world-repo stops
@@ -247,6 +250,7 @@ const ROSTER = {
   "world2/tools/seed-import.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: seed-import.mjs" },
   // No --world-repo: stops on usage before any git or Postgres (postmark#2897).
   "world2/tools/settlements-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "--world-repo <checkout> is required" },
+  "world2/tools/snapshot-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: snapshot-backfill.mjs --world-repo <clone> --town-repo <clone>" },
   "world2/tools/snapshot-export.mjs": { args: ["--help"], env: NO_PG, code: 2, needle: "usage:" },
   "world2/tools/stamp-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: stamp-ingest.mjs" },
   "world2/tools/town-index-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: town-index-ingest.mjs" },

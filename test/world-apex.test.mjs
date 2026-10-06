@@ -675,6 +675,28 @@ test("dispatch: the verb's own refusal stays a refusal — with the terms still 
   assert.equal(r.terms.binds.from, "the-town/sound", "the law shown at the door survived the refusal");
 });
 
+test("dispatch: a say over the limit is a 422 that names the limit and the count, on the MCP road too", async () => {
+  on();
+  // Seven Verity, 2026-10-06: "an oversized say returns did: say with an empty
+  // result, not an error naming the limit." Measured: the refusal reached the
+  // caller all along (the voice door returns it and the apex's last line spreads
+  // it), but the MCP body carried no code, because REST was the only road that
+  // filled one in. The voice now names it itself, so both roads agree.
+  const long = "x".repeat(501);
+  const r = await worldApex({ do: "say", args: { text: long } }, KEY_GAMMA);
+  assert.equal(r.error, "bounce", JSON.stringify(r).slice(0, 300));
+  assert.equal(r.code, 422, "the in-process apex answer names its code");
+  assert.match(r.defect, /that is 501 characters; a voice carries at most 500/);
+  assert.equal(r.result, undefined, "nothing was said, so there is no say result to read");
+  await withOffice({ WORLD_APEX: "1" }, async () => {
+    const { body } = await rpc("tools/call", { name: "world", arguments: { do: "say", args: { text: long } } });
+    const answer = JSON.parse(body.result.content[0].text);
+    assert.equal(body.result.isError, true);
+    assert.equal(answer.code, 422, "the MCP body names the code REST already answered with");
+    assert.match(answer.defect, /501 characters; a voice carries at most 500/);
+  });
+});
+
 test("dispatch: an action no class in the world affords says so plainly", async () => {
   on();
   const r = await worldApex({ do: "conjure" }, KEY_ALPHA);

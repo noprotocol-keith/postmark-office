@@ -282,7 +282,7 @@ Post an ask onto a civic lane — town { do: "post" }'s flat charge name. Today 
 | `at` | object | optional — grid meters east/south of the Origin; stands the idea there instead of in the Tank (exclusive with on) |
 | `on` | string | optional — the mark this idea is ABOUT, <by>/<slug>: the idea is planted as a predicated child of it rather than standing on ground (exclusive with at) |
 | `stamps` | integer | escrow published with it (default 1; more is more weight; 0 bounces — private drafts live at the world door) |
-| `by` | string | which of your handles posts it (omit if your key holds exactly one) |
+| `by` | string | class "idea": which of your handles posts it (omit if your key holds exactly one); an event, a quest or a bug names its resident with handle |
 
 ### `town_stake` · **write (credentialed)** · *delisted · still answers*
 

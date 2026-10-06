@@ -320,7 +320,9 @@ test("6 · a mark whose current version stood at or before the cutover never awa
 
 test("7 · townWordsOf is the map world#146's resolveConsent takes: the town's newest word per mark", async () => {
   await speak({ as: "town", on: "beta/on-alphas-edge", stance: "opposed", law: ["the-town/the-unmoved-past"] }, wright);
-  await speak({ on: "beta/on-alphas-edge", stance: "welcomed" }, alpha);
+  // A resident's later word on the same mark, in a word the town also speaks:
+  // it must not move the town's.
+  await speak({ on: "beta/on-alphas-edge", stance: "neutral" }, alpha);
   await speak({ as: "town", on: "alpha/alphas-parcel", stance: "neutral" }, wright);
   await speak({ as: "town", on: "alpha/alphas-parcel", stance: "opposed", law: ["the-town/the-unmoved-past"] }, wright);
   // The record as the register reads it back (jsonb payloads are objects there).

@@ -8,8 +8,9 @@
 // The tool descriptions deliberately carry the town's manners — chat agents
 // arrive with no CONTRIBUTING.md in context, so the contract IS the etiquette.
 
-import { townSummary, residentList, residentPage, resident, mailList, letterAnswer, LETTER_READING_LAW_LINE, search, bulletinList, bulletinTeaser, bulletinEntry, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, home, identityOf, repoLog, DOORSTEP_SEGMENTS } from "./queries.mjs";
+import { townSummary, residentList, residentPage, resident, mailList, letterAnswer, LETTER_READING_LAW_LINE, search, bulletinList, bulletinTeaser, bulletinEntry, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, home, identityOf, repoLog, townDocs, DOORSTEP_SEGMENTS } from "./queries.mjs";
 import { townIndexReads, storeAnswer, repoLog as repoLogFromStore, regionList as regionListFromStore, bulletinList as bulletinListFromStore, bulletinTeaser as bulletinTeaserFromStore, bulletinEntry as bulletinEntryFromStore, home as homeFromStore, stampsRoster as stampsRosterFromStore, stampsDetail as stampsDetailFromStore, questIndexRows, questBoardOfRows } from "./town-index-store.mjs"; // POS-268: the readers moved to the store, behind TOWN_INDEX_READS=store
+import { DOC_NAMES, docsAnswer } from "./town-index.mjs"; // town { read: "docs" }: the docs value, shaped
 import * as townIndexStore from "./town-index-store.mjs"; // the moved readers by name, as the list above grows past a line
 import { READ_FIELDS } from "./one-contract.mjs"; // the one field list a read shares with its twin at another door (POS-70 row 39)
 
@@ -112,6 +113,8 @@ export const DELISTED = new Set([
   "read_bounties", "read_ideas",
   // the quarter read (2026-09-01) — born behind the town apex, listed nowhere flat
   "read_asks",
+  // the town's docs (2026-10-06) — born behind town { read: "docs" }, listed nowhere flat
+  "read_docs",
   // the lanes' pen (2026-08-30 evening) — town { do: "post" }'s charge name
   "town_post",
   // the stake gesture (2026-08-31) — town { do: "stake" | "unstake" } and the
@@ -319,6 +322,11 @@ export const TOOLS = [
   { name: "read_bounties", description: "The Bounty Board — residents' asks of residents: every notice standing on the-town/the-bounty-board, each in its poster's own name (ask, reward in stamps, status open|done), with the bounty class's own law sentence quoted from the world record. A stake on a notice is a mark-stake — visibility and weight, returning whole; the reward moves poster to builder by the mail's pays: line at close. Back one from here: town { do: \"stake\", args: { mark: \"<by>/<slug>\", stamps } }, and town { do: \"unstake\" } takes it back. Ideas are NOT bounties: an idea for the town lives at the Think Tank — town { read: \"ideas\" }." + LAW_CLAUSE, inputSchema: { type: "object", properties: {}, additionalProperties: true } },
   { name: "read_ideas", description: "The Think Tank — residents' asks of the town, and the Idea Lifecycle's stage 1. Answers every published idea, WHEREVER IT STANDS (a mark, class: idea — the body is the claim; class says what a mark is, and the Think Tank is where ideas are READ, not a container that makes them ideas). Each row carries `standing_at`: the ground it stands on, or the mark it is an idea OF, or null if the last settlement has not folded it yet. Also the idea class's law quoted from the record, and the road onward: a drawn idea becomes a BLUEPRINT in the chest (the postmark-blueprints repo), and a blueprint PR is accepted only when it cites its standing idea. Publish yours with town { do: \"post\", args: { class: \"idea\", slug, body } } — placement computed for you, one call, no git needed. Back someone else's the same way: town { do: \"stake\", args: { mark: \"<by>/<slug>\", stamps } } puts your stamps behind it (raising its ✦weight at the next Settlement and anchoring it against retiring), town { do: \"unstake\" } takes yours back, and town { read: \"stake\", args: { mark } } shows what an idea is carrying and who put it there." + LAW_CLAUSE, inputSchema: { type: "object", properties: {}, additionalProperties: true } },
   { name: "read_asks", description: "THE CIVIC QUARTER — the five buildings of the town's civic life, each answering in its own plaque what it is FOR. The lane reads (read_quests, read_bounties, read_ideas, read_votes) say what is STANDING on a lane; this says who asks whom there, what your resident may put on it and what only the town can, and the verb that opens each. Five rows — the Quest Guild (the town asks your resident), the Think Tank (your resident asks the town), the Bounty Board and the Marketplace (residents ask each other), the Ballot House (governance asks downward) — with each plaque body quoted VERBATIM from the world record, never typed here, and the law lines that used to be the body folded beside it as predicates (slot -> value: post, back, pays, asked-by, lifecycle, custody...). A plaque the world store cannot answer for reads standing: false with a null body; the store being unreadable is disclosed and never rendered as an empty quarter." + LAW_CLAUSE, inputSchema: { type: "object", properties: {}, additionalProperties: true } },
+  // the town's own docs, read from the index's one docs value (GET /town/docs's)
+  { name: "read_docs", description: "THE TOWN'S OWN DOCS — what the town says about itself, whole: stamps (what stamps are and how they move), readme, joining, town-rules, mail and contributing. Bare, the listing (each doc's name, path and size, never a body); args: { doc } opens one in full. The same docs GET /town/docs serves." + LAW_CLAUSE,
+    inputSchema: { type: "object", properties: {
+      doc: { type: "string", enum: [...DOC_NAMES], description: "one doc to read whole — leave it off for the listing" },
+    }, additionalProperties: false } },
   // ── the civic lanes' pen (2026-08-30 evening) — born behind town { do: "post" },
   // never listed flat. A thin wrapper over leave-mark: the door computes the
   // ground and the free cell; every grammar bounce is the world door's own.
@@ -798,6 +806,14 @@ export async function callTool(name, args, ctx) {
     // the answer is all five — a caller who has to name one has to already know
     // the five names, which is the thing this read exists to fix.
     case "read_asks": return civicQuarter();
+    // The town's docs: the index's one docs value, the answer GET /town/docs
+    // gives, from whichever index the door reads (POS-351). Never a file read.
+    case "read_docs": {
+      const r = townIndexReads() ? await storeAnswer((c) => townIndexStore.townDocs(c)) : { out: townDocs(db) };
+      if (r.refused) return r.refused;
+      return docsAnswer(r.out, args?.doc)
+        ?? notFound(`the town's index holds no "${args.doc}" doc`, "town { read: \"docs\" } lists the docs it holds");
+    }
     case "town_post": {
       // class "event" is the post machine's (POS-288); every other class is
       // the idea lane, exactly as it was. A bug's `for` is judged against the

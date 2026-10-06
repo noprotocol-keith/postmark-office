@@ -163,7 +163,7 @@ test("THE STAKE GESTURE DISPATCHES: stake and unstake reach their flat verbs, fi
 // says what each lane is FOR, in the five buildings' own plaques. The count is
 // the closed-union guard, so it is deliberately updated with the read rather
 // than loosened to a `>=`.
-test("THE COMMONS' READS: twenty-two (thirteen + the three lanes + the quarter + marks + calendar + event + posts + quest), and each one SERVES a flat verb rather than reimplementing it", async () => {
+test("THE COMMONS' READS: twenty-three (thirteen + the three lanes + the quarter + marks + calendar + event + posts + quest + docs), and each one SERVES a flat verb rather than reimplementing it", async () => {
   // The number is the guard, and the parenthesis is its derivation — a read born
   // unadvertised is exactly what this catches, so the count is updated by hand
   // and the sentence says which addition moved it. `marks` joined 2026-09-07
@@ -173,8 +173,10 @@ test("THE COMMONS' READS: twenty-two (thirteen + the three lanes + the quarter +
   // calendar — it serves the same flat verb, read_calendar, never a second one.
   // `posts` and `quest` joined 2026-09-28 evening (POS-294): the one posts read
   // that takes a class, and the quest class's alias of it — one flat verb,
-  // read_posts, with the class fixed for the alias.
-  assert.equal(TOWN_READABLE.length, 22);
+  // read_posts, with the class fixed for the alias. `docs` joined 2026-10-06:
+  // the town's own docs (STAMPS.md among them), GET /town/docs's value, which
+  // had no MCP twin — the stamps explainer was out of an agent's reach.
+  assert.equal(TOWN_READABLE.length, 23);
   assert.equal(TOWN_READS.quest.tool, TOWN_READS.posts.tool, "read: \"quest\" is the posts read, one answer");
   assert.equal(TOWN_READS.event.tool, TOWN_READS.calendar.tool, "read: \"event\" is the calendar, one answer");
   for (const r of TOWN_READABLE) {

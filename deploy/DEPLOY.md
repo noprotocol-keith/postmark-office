@@ -689,7 +689,8 @@ name:
    `add_header` at the town server level is replaced inside the gated locations
    by the snippet's own two; say so before going on.
 2. **B only:** write the password file, one operator at a time (each types their
-   own; `openssl passwd -6` asks twice and does not echo):
+   own; `openssl passwd -6` asks twice and does not echo). The group is nginx's
+   worker user (`grep ^user /etc/nginx/nginx.conf`; www-data on Debian/Ubuntu):
 
    ```
    sudo install -m 640 -o root -g www-data /dev/null /etc/nginx/postmark-ops.htpasswd

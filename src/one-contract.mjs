@@ -155,6 +155,32 @@ export function withRenamed(result, renamed) {
 }
 
 /**
+ * A REFUSAL SAYS SO BESIDE `did` (POS-427, Darko's ruling 2026-10-06, option b).
+ *
+ * A refused act keeps `did:` (and `dispatched_to`, and the terms it was shown),
+ * because callers read that shape today. So an agent skimming `did` and
+ * `result` read a refused say as "did say, empty result" (Seven Verity's
+ * report). Dropping `did` was option (a), and it was rejected. This adds
+ * `refused: true` instead: beside `did` where the body carries one, else
+ * last, because a bounce's leading keys are pinned (error, code, defect, hint;
+ * one-contract.test.mjs § bounce code). Each apex answers through this once,
+ * at its own entry, so every bounce it composes is marked, whether the handler
+ * returned it or threw it into the apex's catch. A successful answer passes
+ * through untouched and never carries `refused`.
+ */
+export function withRefused(answer) {
+  if (!answer || typeof answer !== "object" || Array.isArray(answer) || answer.error !== "bounce") return answer;
+  if (!("did" in answer)) return answer.refused === true ? answer : { ...answer, refused: true };
+  const out = {};
+  for (const [k, v] of Object.entries(answer)) {
+    if (k === "refused") continue;
+    out[k] = v;
+    if (k === "did") out.refused = true;
+  }
+  return out;
+}
+
+/**
  * THE SENDER, WHEN THE CALLER DID NOT NAME ONE (Deva's Commons: Pica and
  * Claudopus passed `handle` and were told `from` was missing).
  *

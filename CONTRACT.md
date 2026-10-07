@@ -63,7 +63,13 @@ With `OFFICE_PAPERWORK_STORE=1` (POS-271) it lives in the store's paperwork tabl
 ```
 `code` is the HTTP status, in the body as well as the status line — the apexes' own
 bounce shape, so a REST body and an MCP answer carry the same fields (since
-`train/2026-w40`; additive, no status changed). HTTP codes: 400 (malformed), 401 (no/bad key), 403 (not your resident), 404, 409
+`train/2026-w40`; additive, no status changed). A refusal that one of the three apexes
+(`world`, `town`, `household`) answers also carries `refused: true` (POS-427, since
+`train/2026-w42`). A refused act keeps `did` and `dispatched_to`, which name what was
+asked, so `refused` sits beside `did`. A refusal has no `result`. A successful answer
+never carries `refused`. The door's own gates in front of the apexes (sign-in,
+standing, harbor, visitor scope, argument validation, the rate limit) do not add it
+yet: read `error` there. HTTP codes: 400 (malformed), 401 (no/bad key), 403 (not your resident), 404, 409
 (`not-yet-open` stubs), 413 (size courtesy), 422 (envelope defect — the bounce class), 429.
 
 ## One contract for both doors (POS-70, postmark#2754)

@@ -37,7 +37,7 @@ import { harborGated, HARBOR_BOUNCE } from "./harbor-gate.mjs";
 import { standingBounce } from "./standing.mjs";
 // POS-70: the act-field judgement, the aliases and the rename pointer — one
 // owner for every door (src/one-contract.mjs).
-import { judgeActFields, withRenamed, renamedRow, READ_FIELDS, READ_TWINS } from "./one-contract.mjs";
+import { judgeActFields, withRenamed, withRefused, renamedRow, READ_FIELDS, READ_TWINS } from "./one-contract.mjs";
 import { validateReadArgs } from "./validate-args.mjs"; // the flat tools' own validator, now at the read branch too
 import { resident as residentQ, home as homeQ, letterAnswer, letterParties, identityOf, indexAsOf, mailList, mailAwaiting, mailCorrespondents, outboxSettled, windowRead, DOORSTEP_SEGMENTS } from "./queries.mjs";
 import { doorstepBundle } from "./doorstep-bundle.mjs";
@@ -1076,9 +1076,11 @@ export async function householdApex(args = {}, key = null, ctx = {}) {
   // is null and every read is office.db's, exactly as before.
   const tis = await import("./town-index-store.mjs");
   const ix = tis.townIndexReads() ? tis.storeIndexPooled(clone) : null;
-  try { return await householdApexRead(args, key, { ...ctx, ix }, { db, clone, odb, dbPath, pen, schemas, schemaRequired, meta, asOf, canWrite, channel, slim, ix }); }
+  // The one place a household answer leaves the apex, so the one place a
+  // refusal is marked `refused: true` (POS-427, one-contract.mjs § withRefused).
+  try { return withRefused(await householdApexRead(args, key, { ...ctx, ix }, { db, clone, odb, dbPath, pen, schemas, schemaRequired, meta, asOf, canWrite, channel, slim, ix })); }
   catch (e) {
-    if (e instanceof tis.TownIndexUnreachable) return bounce(503, e.refused.defect, e.refused.hint);
+    if (e instanceof tis.TownIndexUnreachable) return withRefused(bounce(503, e.refused.defect, e.refused.hint));
     throw e;
   }
 }

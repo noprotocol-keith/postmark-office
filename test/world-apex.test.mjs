@@ -1547,6 +1547,87 @@ test("berth: nothing durable — a mark refuses a berth at the dispatch, terms s
   });
 });
 
+// ── POS-427 · a refusal says `refused: true`, beside `did` ───────────────────
+//
+// Darko's ruling 2026-10-06, option (b): a refused act keeps `did:` and gains
+// `refused: true` beside it, so a caller skimming `did` and `result` cannot
+// read a refusal as "did say, empty result" (Seven Verity's report). The apex
+// marks every answer once, at its own entry (one-contract.mjs § withRefused).
+const besideDid = (r) => {
+  const keys = Object.keys(r);
+  return keys.indexOf("refused") === keys.indexOf("did") + 1;
+};
+
+test("POS-427 · a refused act carries refused: true beside did, returned or thrown, on every road", async () => {
+  on();
+  // RETURNED: the voice door returns its bounce and the apex's last line spreads it.
+  const long = "x".repeat(501);
+  const said = await worldApex({ do: "say", args: { text: long } }, KEY_GAMMA);
+  assert.equal(said.error, "bounce");
+  assert.equal(said.did, "say");
+  assert.equal(said.refused, true, JSON.stringify(said).slice(0, 300));
+  assert.ok(besideDid(said), `refused sits beside did: ${Object.keys(said).join(", ")}`);
+  assert.equal(said.result, undefined);
+  // THROWN: world_leave_mark throws its bounce and the apex's catch rebuilds it.
+  const law = [
+    { id: "the-town/resident", by: "the-town", kind: "sited", tier: "constitution", at: { x: 2400, y: 2400 }, extent: { w: 10, h: 10 },
+      body: "A household's living voice.",
+      props: { class: "resident", class_version: 5, ambient: true, actions: [{ action: "leave-mark", residue: "the-town/sound" }] } },
+  ];
+  const path = join(repo, "apex-world-refused.db");
+  buildStore([...MARKS, ...law], path);
+  await withStore(path, async () => {
+    const thrown = await worldApex({ do: "leave-mark", args: { slug: "Not A Slug" } }, KEY_ALPHA);
+    assert.equal(thrown.error, "bounce");
+    assert.match(thrown.defect, /slug must be kebab-case/);
+    assert.equal(thrown.did, "leave-mark");
+    assert.equal(thrown.refused, true, JSON.stringify(thrown).slice(0, 300));
+    assert.ok(besideDid(thrown), `refused sits beside did: ${Object.keys(thrown).join(", ")}`);
+  });
+  // THE DOORS: the MCP body and the REST body are the apex's answer, so both carry it.
+  await withOffice({ WORLD_APEX: "1" }, async () => {
+    const { body } = await rpc("tools/call", { name: "world", arguments: { do: "say", args: { text: long } } });
+    const answer = JSON.parse(body.result.content[0].text);
+    assert.equal(body.result.isError, true);
+    assert.equal(answer.refused, true, "the MCP body says refused");
+    assert.ok(besideDid(answer));
+    const res = await fetch(`${BASE}/world/apex`, {
+      method: "POST",
+      headers: { authorization: "Bearer apexkey", "content-type": "application/json" },
+      body: JSON.stringify({ do: "say", args: { text: long } }),
+    });
+    assert.equal(res.status, 422);
+    const rest = await res.json();
+    assert.equal(rest.refused, true, "the REST body says refused");
+    assert.ok(besideDid(rest));
+  });
+});
+
+test("POS-427 · a refusal with no did (a read, the door's own checks) says refused last; a success never does", async () => {
+  on();
+  const read = await worldApex({ read: "say", args: { text: "hi" } }, KEY_ALPHA);
+  assert.equal(read.error, "bounce");
+  assert.equal(read.did, undefined);
+  assert.equal(read.refused, true, JSON.stringify(read).slice(0, 300));
+  assert.equal(Object.keys(read).at(-1), "refused");
+  assert.deepEqual(Object.keys(read).slice(0, 2), ["error", "code"], "the pinned leading keys do not move");
+  const both = await worldApex({ do: "say", read: "say" }, KEY_ALPHA);
+  assert.equal(Object.keys(both).at(-1), "refused");
+  const nowhere = await worldApex({ do: "conjure" }, KEY_ALPHA);
+  assert.equal(nowhere.refused, true);
+  // The successes: an act that lands, a read, and the bare read.
+  const spoke = await worldApex({ do: "say", args: { text: "a voice, not refused" } }, { ...BERTH_KEY, slug: "refused-probe", rulesRead: true });
+  assert.ok(!spoke.error, JSON.stringify(spoke).slice(0, 300));
+  assert.equal(spoke.did, "say");
+  assert.equal("refused" in spoke, false, "a landed act never carries refused");
+  const heard = await worldApex({ read: "say" }, KEY_ALPHA);
+  assert.ok(!heard.error, JSON.stringify(heard).slice(0, 300));
+  assert.equal("refused" in heard, false);
+  const bare = await worldApex({}, KEY_ALPHA);
+  assert.ok(!bare.error);
+  assert.equal("refused" in bare, false);
+});
+
 test("berth: the bare read answers as the quay's spectator — resident grants are not theirs", async () => {
   on();
   const r = await worldApex({}, BERTH_KEY);

@@ -610,3 +610,30 @@ test("PARITY · an apex called WITHOUT its schema map says so — a validator th
   assert.match(r.hint, /ctx\.schemas/);
   assert.deepEqual(a.calls, []);
 });
+
+// ── POS-427 · a refusal says `refused: true`, beside `did` ──────────────────
+test("POS-427 · a refused town act carries refused: true beside did; a success never carries it", async () => {
+  // The flat verb's refusal (callTool turns a thrown bounce into a body) rides
+  // back as the act's answer, `did` kept, and `refused` beside it.
+  const refusing = async () => ({ error: "bounce", code: 409, defect: "that idea is closed", hint: "stake an open one" });
+  const r = await townApex({ do: "stake", args: { mark: "wright/an-idea", stamps: 1 } }, key(), ctx({ call: refusing }));
+  assert.equal(r.error, "bounce");
+  assert.equal(r.did, "stake");
+  assert.equal(r.refused, true);
+  const keys = Object.keys(r);
+  assert.equal(keys.indexOf("refused"), keys.indexOf("did") + 1, `refused sits beside did: ${keys.join(", ")}`);
+  // The apex's own field judgement refuses with did too.
+  const judged = await townApex({ do: "stake", args: { mark: "wright/an-idea", stamps: 1, zz: 1 } }, key(), ctx({ call: spy().call }));
+  assert.equal(judged.did, "stake");
+  assert.equal(judged.refused, true);
+  // A refusal with no did: the register falsifier's own bounce.
+  const unknown = await townApex({ do: "teleport" }, key(), ctx({ call: spy().call }));
+  assert.equal(unknown.refused, true);
+  assert.equal(Object.keys(unknown).at(-1), "refused");
+  // Successes: an act, a read, the bare call.
+  const staked = await townApex({ do: "stake", args: { mark: "wright/an-idea", stamps: 1 } }, key(), ctx({ call: spy().call }));
+  assert.equal(staked.did, "stake");
+  assert.equal("refused" in staked, false);
+  assert.equal("refused" in await townApex({ read: "post" }, key(), ctx({ call: spy().call })), false);
+  assert.equal("refused" in await townApex({}, key(), ctx({ call: spy().call })), false);
+});

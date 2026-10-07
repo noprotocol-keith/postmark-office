@@ -86,11 +86,15 @@ async function houseOf(ctx, handle) {
 // ── the money half: the three rails, through their own deciders ──────────────
 
 async function townFacts(ctx) {
-  const { readFundRegistry, meepLawOf } = await ctx.importOffice("src/fund-holder.mjs");
+  // POS-346: the watchers resolve the payer from the store (fund-holder.mjs §
+  // payerRegistry: the registry rows and the town_residents roll the sandbox
+  // ingests after every step), so the sandbox hands their deciders the same.
+  const { payerRegistry, meepLawOf } = await ctx.importOffice("src/fund-holder.mjs");
   const { townEngine } = await ctx.importOffice("tools/stripe-watch.mjs");
   const engine = await townEngine(ctx.town);
   const entries = ctx.entries();
-  return { engine, entries, households: engine.householdKeys(ctx.town), registry: readFundRegistry(ctx.town), isMeep: meepLawOf(engine, entries, ctx.clock.date) };
+  const registry = await payerRegistry();
+  return { engine, entries, households: registry.residents, registry, isMeep: meepLawOf(engine, entries, ctx.clock.date) };
 }
 
 const noonOf = (date) => Date.parse(`${date}T12:00:00Z`);

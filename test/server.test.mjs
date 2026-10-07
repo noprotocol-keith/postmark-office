@@ -278,7 +278,8 @@ test("PATCH /profile/{handle}/avatar reaches the REST image door and keeps its b
     });
     assert.equal(truncated.status, 422);
     // `code` rides the body since POS-70 row 35 (2026-09-24) — the status, said twice.
-    assert.deepEqual(await truncated.json(), { error: "bounce", code: 422, defect: "the file ends mid-stream", hint: "re-export it and try again" });
+    // `refused` since POS-427 (2026-10-06): every refusal says so, last.
+    assert.deepEqual(await truncated.json(), { error: "bounce", code: 422, defect: "the file ends mid-stream", hint: "re-export it and try again", refused: true });
   } finally {
     if (avatarServer.exitCode === null) {
       const gone = new Promise((ok) => avatarServer.on("exit", ok));

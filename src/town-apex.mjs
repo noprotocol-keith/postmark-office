@@ -31,7 +31,7 @@
 import { actionFields, apexEnabled } from "./world-apex.mjs";
 import { standingBounce } from "./standing.mjs";
 import { harborGated, HARBOR_BOUNCE } from "./harbor-gate.mjs";
-import { judgeActFields, withRenamed } from "./one-contract.mjs"; // POS-70: one field judgement for every door
+import { judgeActFields, withRenamed, withRefused } from "./one-contract.mjs"; // POS-70: one field judgement for every door; POS-427: refused beside did
 import { validateReadArgs } from "./validate-args.mjs"; // the flat tools' own validator, now at the read branch too
 
 const bounce = (code, defect, hint, extra = {}) => ({ error: "bounce", code, defect, hint, ...extra });
@@ -264,7 +264,13 @@ function actCard(act, { schemas, schemaRequired } = {}) {
  * slim honest (a delisted verb still answers, because it is still the thing
  * doing the answering).
  */
+// The one place a town answer leaves the apex, so the one place a refusal is
+// marked `refused: true` (POS-427, one-contract.mjs § withRefused).
 export async function townApex(args = {}, key = null, ctx = {}) {
+  return withRefused(await townApexAnswer(args, key, ctx));
+}
+
+async function townApexAnswer(args, key, ctx) {
   const { clone, schemas, schemaRequired, call } = ctx;
   const doing = args.do != null && args.do !== "";
   const reading = args.read != null && args.read !== "";

@@ -36,7 +36,7 @@
 // law — refuse or disclose absent inputs, never quietly substitute.)
 
 import { DatabaseSync } from "node:sqlite";
-import { renamedRow, DOOR_FIELDS } from "./one-contract.mjs"; // POS-70: the one rename shape; POS-246: the door's own fields
+import { renamedRow, DOOR_FIELDS, withRefused } from "./one-contract.mjs"; // POS-70: the one rename shape; POS-246: the door's own fields; POS-427: refused beside did
 import { actUnderNonce, nonceDefect } from "./act-nonce.mjs"; // POS-246: a world act's retry key
 import { existsSync, readFileSync } from "node:fs";
 import { refShaFromDisk } from "./world-branches.mjs";
@@ -3086,7 +3086,14 @@ async function apexReadAction(args, key, ctx = {}) {
   } finally { store.db?.close(); }
 }
 
+// THE ONE PLACE A WORLD ANSWER LEAVES THE APEX, so the one place a refusal is
+// marked `refused: true` (POS-427, one-contract.mjs § withRefused). Every
+// return below, the act's catch included, comes back through here.
 export async function worldApex(args = {}, key = null, ctx = {}) {
+  return withRefused(await worldApexAnswer(args, key, ctx));
+}
+
+async function worldApexAnswer(args, key, ctx) {
   if (!apexEnabled()) return bounce(404, "the apex verb is not switched on at this office", "the operator runs it behind WORLD_APEX=1; the flat world_* verbs answer meanwhile");
   const doing = args.do != null && args.do !== "";
   const reading = args.read != null && args.read !== "";

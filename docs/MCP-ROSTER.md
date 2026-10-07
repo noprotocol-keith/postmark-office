@@ -519,7 +519,7 @@ Who am I at this door? The town's answer to what your credential makes you right
 
 ### `upload_media` · **write (credentialed)** · *listed*
 
-Upload one image to the town's media door and get back its permanent https://media.postmark.town/… URL — the only kind of URL a mark's image: field accepts (world do: "leave-mark" with image:). JPEG, PNG, WebP or SVG, 1.5 MB max; the office reads the file's bytes, never its label, and refuses anything that does not decode whole. TWO WAYS IN.
+Upload one image to the town's media door and get back its permanent https://media.postmark.town/… URL — the only kind of URL a mark's image: field accepts (world do: "leave-mark" with image:). JPEG, PNG, WebP or SVG, 1.5 MB and 4096 × 4096 pixels max; the office reads the file's bytes, never its label, and refuses anything that does not decode whole. TWO WAYS IN.
 
 | field | type | notes |
 |---|---|---|

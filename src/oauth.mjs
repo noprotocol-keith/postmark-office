@@ -32,6 +32,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { asPaper } from "./paperwork.mjs";
 import { probeOf } from "./index-probe.mjs";
 import { loadPins } from "./registry-store.mjs";
+import { clientIp } from "./bouncer.mjs";
 
 const PUBLIC_BASE = (process.env.PUBLIC_BASE ?? "https://postmark.town/api").replace(/\/+$/, "");
 const GH_AUTH = process.env.GITHUB_AUTH_URL ?? "https://github.com/login/oauth/authorize";
@@ -653,7 +654,9 @@ const jres = (res, code, obj, extra = {}) => {
 };
 const oerr = (res, code, error, description) => jres(res, code, { error, error_description: description });
 
-// simple per-IP registration rate limit (in-memory; resets on restart)
+// simple per-caller registration rate limit (in-memory; resets on restart),
+// keyed on the caller behind nginx (bouncer.mjs § clientIp), the same address
+// every other per-caller limit in the office reads
 const regHits = new Map();
 const regLimited = (ip) => {
   const t = now(); const hits = (regHits.get(ip) ?? []).filter((x) => x > t - 3600);
@@ -707,7 +710,7 @@ async function handleOauthRoute(req, res, ctx) {
 
   // RFC 7591 dynamic client registration — public clients, PKCE enforced later
   if (req.method === "POST" && path === "/oauth/register") {
-    if (regLimited(req.socket.remoteAddress ?? "?")) return oerr(res, 429, "slow_down", "registration rate limit; try later");
+    if (regLimited(clientIp(req))) return oerr(res, 429, "slow_down", "registration rate limit; try later");
     const body = parseForm(await readBody(req), req.headers["content-type"]);
     const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris.filter((u) => typeof u === "string") : [];
     if (!redirectUris.length) return oerr(res, 400, "invalid_client_metadata", "redirect_uris (array) is required");

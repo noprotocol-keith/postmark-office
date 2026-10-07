@@ -271,6 +271,32 @@ test("USDC: a signed-in key may name only a resident it acts for — { handle: \
   rmSync(town.repo, { recursive: true, force: true });
 });
 
+// ── POS-388 (Wright's option A, 2026-10-07): a key that is nobody's ──────────
+test("USDC: a key with no account and no resident (a bare berth) is refused before the town or the chain is read; a visitor pass and a household key are not", { skip: SKIP }, async () => {
+  const town = seamTown();
+  const recorded = [];
+  let asked = 0;
+  const record = async (r) => { recorded.push(r); return { line: "x", commit: null }; };
+  const counted = async (args) => { asked++; return verified(args); };
+  const opts = (key) => ({ verify: counted, record, engine: ENGINE, potMap: new Map(), key });
+  // the bare berth's shape, as oauth.mjs § berthLookup returns it
+  const berth = { berth: true, slug: "gangplank-walker", household: null, handles: new Set(), cosigned: false, rulesRead: false };
+  for (const body of [{ txhash: TX, pot: "keep", handle: "carol" }, { txhash: TX, pot: "keep", household: "g202" }, { txhash: TX, pot: "keep" }])
+    await assert.rejects(fundVerify(town.repo, body, opts(berth)),
+      (e) => e.code === 403 && /names no account and no resident/.test(e.defect), JSON.stringify(body));
+  assert.equal(asked, 0, "the chain was never asked");
+  assert.equal(recorded.length, 0, "nothing was written");
+
+  const visitor = { ghId: 909, ghLogin: "passer-by", household: null, handles: new Set() };
+  await assert.rejects(fundVerify(town.repo, { txhash: TX, pot: "keep" }, opts(visitor)),
+    (e) => e.code === 404 && /no household holds account g909/.test(e.defect), "a visitor pass has an account, so it meets the account's own refusal");
+  const house = await fundVerify(town.repo, { txhash: TX, pot: "keep", handle: "carol" }, opts({ household: "carols", handles: new Set(["carol"]) }));
+  assert.equal(recorded.at(-1).from, "carol", "a household key names its residents and goes on");
+  assert.ok(house);
+  assert.equal(asked, 1);
+  rmSync(town.repo, { recursive: true, force: true });
+});
+
 test("the door takes `household`: POST /fund/verify and household { do: \"fund-verify\" } judge it lawful (the w41 fund page sends it)", async () => {
   const { judgeRoute } = await import("../src/one-contract.mjs");
   const { APEX_ONLY_FIELDS } = await import("../src/household-apex.mjs");

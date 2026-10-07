@@ -2652,11 +2652,15 @@ const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
 
     // ── POST /fund/verify — the seam's public door (S3, USDC rail) ───────────
     // A patron's tx hash becomes a witnessed pot receipt, or a refusal they are
-    // owed verbatim. DELIBERATELY UNCREDENTIALED: the witness is the payment
-    // itself, on a public chain, to one published address — a key would gate
-    // who may TELL the town about a dollar it already holds, which protects
-    // nothing and loses real money. Every abuse this opens is already refused
-    // downstream: a hash that paid someone else fails the witness, a replayed
+    // owed verbatim. CREDENTIALED, BY POSITION: this route sits below the
+    // write tier's `if (!key)` above, so a call with no key is answered 401
+    // there and never reaches it (so it has been since the door was built,
+    // 2026-08-21; an earlier version of this comment said "deliberately
+    // uncredentialed", and the gate never agreed). Every caller here pays its
+    // key's write bucket. A key that names no account and no resident (a bare
+    // berth) is refused in fundVerify before the chain is asked (POS-388): a
+    // receipt is durable and in a household's name, and a berth has neither.
+    // The rest is refused downstream: a hash that paid someone else fails the witness, a replayed
     // hash fails the ledger's ref uniqueness, a hash aimed past a pot's need
     // fails D5, and a handle the town does not keep fails before the chain is
     // even consulted. What it cannot stop is someone naming a pot the payer did

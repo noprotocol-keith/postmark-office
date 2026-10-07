@@ -631,7 +631,9 @@ async function advanceBug(fields, key, id, { now, env, roll }) {
       throw refuse(404, `no bug "${j.of}" to be a duplicate of`, 'of: a standing bug post — town { read: "posts", args: { class: "bug" } } lists them', { field: "of" });
     // The critter's namer is the fix's credit, kept beside the name so the post says who named it.
     const set = { ...(j.size ? { size: j.size } : {}), ...(j.critter ? { critter: j.critter, named_by: j.credit } : {}),
-      ...(j.grade ? { grade: j.grade } : {}), ...(j.of ? { of: j.of } : {}) };
+      ...(j.grade ? { grade: j.grade } : {}), ...(j.of ? { of: j.of } : {}),
+      // The link is kept per stage; the act carries the post's whole map after it, as the reveal does.
+      ...(j.link ? { links: { ...(prev.fields?.links ?? {}), [j.to]: j.link } } : {}) };
     const payload = { post: id, from: prev.state, to: j.to, ...(j.credit ? { credit: j.credit } : {}),
       ...(Object.keys(set).length ? { fields: set } : {}), hand };
     const actId = await insertAct(client, bugActRow({ action: ACT_ADVANCE, actor: hand, object: id, payload, now }));
@@ -646,8 +648,8 @@ async function advanceBug(fields, key, id, { now, env, roll }) {
       ? `the ladder owes ${j.credit} ${n} stamps for ${j.to}, paid by the reviewed stage pass (not by this act), subject to the town's meep law and, at confirmed, three paid reports per household a week`
       : `${j.to} pays nothing`;
     return { post: bugAnswer(row), act_id: actId, hand, stage: j.to, ...(j.credit ? { credit: j.credit } : {}), stamps: n,
-      ...(j.critter ? { critter: j.critter } : {}),
-      receipt: `advanced: ${id} ${prev.state} → ${j.to} by ${hand}'s hand; ${pays}${skipped.length ? `; skipped ${skipped.join(", ")}, and a skipped stage pays nothing` : ""}${j.critter ? `; its critter is "${j.critter}", named by ${j.credit}` : ""}`,
+      ...(j.critter ? { critter: j.critter } : {}), ...(j.link ? { link: j.link } : {}),
+      receipt: `advanced: ${id} ${prev.state} → ${j.to} by ${hand}'s hand; ${pays}${skipped.length ? `; skipped ${skipped.join(", ")}, and a skipped stage pays nothing` : ""}${j.critter ? `; its critter is "${j.critter}", named by ${j.credit}` : ""}${j.link ? `; ${j.to} points at ${j.link}` : ""}`,
       read: bugReadHint(id) };
   }, env);
 }

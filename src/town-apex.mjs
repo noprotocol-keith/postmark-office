@@ -192,7 +192,7 @@ const TOWN_ACTS = {
   close: { tool: "town_close",
     inline: "close a post you or your household put up — an event closes as cancelled, stays on the calendar marked so, and its id is never reused; a quest closes as closed, by the town's hands, and the act names the hand" },
   advance: { tool: "town_advance",
-    inline: "move a post along its class's lifecycle — an event has no advance (its phases follow its clock: amend its times, or close it). A bug advances by the town's hands: reported → confirmed → reproduced → diagnosed → briefed → fixed → shipped, or to duplicate / not-a-bug; each paid stage names whom it credits, and fixed carries the critter its fixer named" },
+    inline: "move a post along its class's lifecycle — an event has no advance (its phases follow its clock: amend its times, or close it). A bug advances by the town's hands: reported → confirmed → reproduced → diagnosed → briefed → fixed → shipped, or to duplicate / not-a-bug; each paid stage names whom it credits, fixed carries the critter its fixer named, and any advance may carry link: the issue comment, PR or tag that earned the stage" },
   reveal: { tool: "town_reveal",
     inline: "reveal a shipped bug's critter: the town's hands set the three candidates Iris painted (candidates: three media URLs), then the fixer who named the critter picks one (pick: 1–3); the jar shows the picked image, chosen once" },
   stake: { tool: "town_stake", shadow: { tool: "town_stake_read", key: "stakes" },

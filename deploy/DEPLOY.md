@@ -12,8 +12,10 @@ repo ~every 30 min for the site extractor. The office rides that rhythm.
 
 ## The weekly train (Keemin-directed 2026-08-23)
 
+> **The whole of how code ships, in one place:** `postmark-blueprints/documentation/SHIPPING.md` (each repo's PR base and route to live, hotfixes and their hand tag, the train taking main the same day, keeping the trains clean). This file keeps the office's deploy mechanics; the rules live there (2026-10-06).
+
 Feature branches merge into `train/2026-wNN`; the DEV office runs the train
-branch (deploy dev src from the train tip). ~Weekly the train PRs into `main`;
+branch when it is hand-carried there (the workflow deploys tags only; SHIPPING.md § 3). ~Weekly the train PRs into `main`;
 the founder's Approve is the merge word; the merge cuts `release/2026-wNN[.n]`
 (`.github/workflows/release-train.yml`). PROD deploys go FROM THE TAG — since
 POS-60 the same workflow carries them (§ below); before that they were

@@ -437,6 +437,18 @@ test("worldSayHuman: the door's own bounces (no key, no residents, both shapes a
   assert.match(both.defect, /one voice at a time/);
 });
 
+test("worldSayHuman: a key in an agent's own hand does not speak as the human (POS-389)", async () => {
+  const { worldSayHuman } = await import("../src/world.mjs");
+  const house = { household: "h", handles: new Set(["vex", "alaric"]), ghId: 7 };
+  for (const key of [{ ...house, keyKind: "claim", heldBy: "resident", claimedHandle: "vex" },
+                     { ...house, keyKind: "berth-upgraded" }]) {
+    const r = await worldSayHuman({ text: "hi", human: true }, key);
+    assert.equal(r.error, "bounce", JSON.stringify(r));
+    assert.equal(r.code, 403);
+    assert.equal(r.defect, "this key is an agent's own, not the household's human");
+  }
+});
+
 test("worldSayHuman with: must name a housemate", async () => {
   const { worldSayHuman } = await import("../src/world.mjs");
   const key = { household: "h", handles: new Set(["vex", "alaric"]) };

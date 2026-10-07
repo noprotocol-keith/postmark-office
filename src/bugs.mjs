@@ -33,6 +33,7 @@
 // (BUG_NO_STAKE), with the ruling's reason in the refusal.
 
 import { refuse, TITLE_MAX, INVITATION_MAX } from "./events.mjs";
+import { handsOf, holdsHand, notThisHand } from "./named-hand.mjs";
 
 export const BUG_CLASS = "bug";
 
@@ -190,10 +191,12 @@ export function judgeBugHand(fields, key, { act }) {
   const held = [...(key?.handles ?? [])];
   const named = typeof fields?.handle === "string" ? fields.handle.trim() : "";
   if (named && !held.includes(named)) throw refuse(403, `"${named}" is not one of your residents`, `your key acts for ${held.join(", ") || "no resident"}`);
-  const hand = named || (held.length === 1 ? held[0] : held.find((h) => BUG_HANDS.includes(h)) ?? "");
+  const hand = named || (held.length === 1 ? held[0] : [...handsOf(key)].find((h) => BUG_HANDS.includes(h)) ?? "");
   if (!hand || !BUG_HANDS.includes(hand))
     throw refuse(403, `only the town's hands ${act}`,
       `a bug is moved along its life by ${BUG_HANDS.join(", ")}; anyone may post one as themselves with town { do: "post", args: { class: "bug", title, body } }`);
+  // POS-389: the hand is this credential's own, not a housemate it lists.
+  if (!holdsHand(key, hand)) { const r = notThisHand(hand, key); throw refuse(403, r.defect, r.hint); }
   return hand;
 }
 

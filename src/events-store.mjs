@@ -32,6 +32,7 @@
 
 import { officeRead, officeWrite, insertAct, PenUnreachableError } from "./world2-pen.mjs";
 import { householdKeyFor } from "./world2-claims.mjs";
+import { holdsHand } from "./named-hand.mjs";
 import { sessionKeysVia } from "./household-deriver.mjs";
 import { currentCrossing } from "./crossings.mjs";
 import { wakesNote, earpieceEnabled } from "./earpiece.mjs";
@@ -588,7 +589,7 @@ async function amendBug(fields, key, id, { now, env }) {
   return write(async (client) => {
     const prev = await bugRow(client, id);
     if (!prev) throw refuse(404, `no bug "${id}"`, 'town { read: "posts", args: { class: "bug" } } lists them');
-    const isHand = BUG_HANDS.includes(acting);
+    const isHand = BUG_HANDS.includes(acting) && holdsHand(key, acting); // POS-389: this credential's own hand
     // A finished bug takes one amendment only: a hand linking its discussion (issue), at any stage.
     const onlyIssue = Object.keys(text.fields).length === 1 && text.fields.issue !== undefined && text.title === undefined && text.body === undefined;
     if (BUG_FINISHED.includes(prev.state) && !(isHand && onlyIssue))

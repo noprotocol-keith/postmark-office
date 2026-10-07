@@ -216,6 +216,10 @@ test("4 · the reporter amends until confirmed and the hands after; only the cha
   assert.equal(JSON.parse(pen.rows().at(-1).payload).hand, "wright");
   assert.equal(posts.get(ID).fields.record, "https://postmark.town/api/release");
   assert.equal(posts.get(ID).fields.steps, "Open, close, open.", "an amend of one field left the other standing");
+  // POS-389: a housemate's OWN key naming the hand is not the hand
+  const ownKey = { household: "starforge", handles: new Set(["wright", "mari"]), keyKind: "claim", heldBy: "resident", claimedHandle: "mari" };
+  await refusedWith(amendAtTown({ post: ID, handle: "wright", record: "https://postmark.town/api/other" }, ownKey, { now: NOW, roll: ROLL }), 403, /not yours to amend/);
+  await refusedWith(advanceAtTown({ post: ID, handle: "wright", to: "not-a-bug" }, ownKey, { now: NOW, roll: ROLL }), 403, /not this key's own hand/);
 });
 
 // ── 5 ───────────────────────────────────────────────────────────────────────

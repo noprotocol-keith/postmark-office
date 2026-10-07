@@ -33,6 +33,7 @@
 // parent's retirement touch no claim. (Wright ruled the claim id, 2026-10-06.)
 
 import { PEN_HANDLE } from "./earpiece.mjs";
+import { handsOf, holdsHand, notThisHand } from "./named-hand.mjs";
 import { blessed, readAtRef } from "./world-branches.mjs";
 
 /** The town, as a ground and as a seat on every mark. */
@@ -72,10 +73,12 @@ export function judgeTownHand(args, key, hands = TOWN_HANDS) {
   const named = String(args?.handle ?? "").trim();
   if (named && !held.includes(named))
     throw bounce(403, `"${named}" is not one of your residents`, `this key acts for: ${held.join(", ") || "(none)"}`);
-  const hand = named || (held.length === 1 ? held[0] : held.find((h) => hands.includes(h)) ?? "");
+  const hand = named || (held.length === 1 ? held[0] : [...handsOf(key)].find((h) => hands.includes(h)) ?? "");
   if (!hand || !hands.includes(hand))
     throw bounce(403, "only the town's hands speak as the town",
       `the town's word is written by its own pen (${TOWN_SPEAKER}, household ${TOWN}); the hands that may hold it are ${hands.join(", ")}. To speak as yourself, drop as: "${AS_TOWN}".`);
+  // POS-389: the hand is this credential's own, not a housemate it lists.
+  if (!holdsHand(key, hand)) { const r = notThisHand(hand, key); throw bounce(403, r.defect, r.hint); }
   return hand;
 }
 

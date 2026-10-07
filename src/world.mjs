@@ -24,6 +24,7 @@ import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isPrincipal } from "./ops.mjs";
+import { agentHeld, holdsHand } from "./named-hand.mjs"; // POS-389: a named gate asks whose hand the credential is
 import { nextSettlementAttemptAt } from "./settlements.mjs";
 import { execUnderTownLock, lockTimedOut, LOCK_BUSY } from "./town-lock.mjs";
 import {
@@ -1418,6 +1419,13 @@ async function humanStand(args = {}, key = null) {
   if (args.handle)
     return { error: "bounce", defect: "one voice at a time",
       hint: "speak as your resident with handle:, or as yourself with human: true — not both" };
+  // THE HUMAN'S VOICE IS THE HUMAN'S CREDENTIAL'S (POS-389). A key in a
+  // resident's own hand carries the whole house, so it would pass the line
+  // below; but it is the resident's key, and the human's name written by it
+  // is the ghost-writing the human class exists to prevent.
+  if (agentHeld(key))
+    return { error: "bounce", code: 403, defect: "this key is an agent's own, not the household's human",
+      hint: "speak as your resident with handle:; the human speaks with their own sign-in or the household key they hold" };
   const handles = [...(key?.handles ?? [])];
   if (!handles.length)
     return { error: "bounce", defect: "no residents on this key",
@@ -3697,7 +3705,9 @@ const CONSENT_KEY = "_consent";
 
 /** Null when this is not a placement on another's behalf (the caller answers the unchanged 403); otherwise who placed, on whose asking, under which household. */
 async function placingOnBehalf(by, payload, key, bounce) {
-  const placers = ON_BEHALF_PLACERS.filter((h) => key?.handles?.has(h));
+  // The placer is the hand this credential is FOR, not a housemate it lists
+  // (POS-389, named-hand.mjs).
+  const placers = ON_BEHALF_PLACERS.filter((h) => holdsHand(key, h));
   if (!placers.length || payload.kind !== "parcel") return null;
   const consent = typeof payload.consent === "string" ? payload.consent.trim() : "";
   if (!consent) throw bounce(422, "a placement on a resident's behalf needs consent",

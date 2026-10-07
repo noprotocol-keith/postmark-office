@@ -262,6 +262,20 @@ test("a key holding several placers must say which is placing; placed_by names i
   assert.equal(wrong.code, 403, JSON.stringify(wrong));
 });
 
+// POS-389: a key in a resident's OWN hand carries the whole house, and places
+// only as the hand it was granted for.
+const ownKey = (handle) => ({ ...FOUNDER, handles: new Set([...FOUNDER.handles, "mari"]), keyKind: "claim", heldBy: "resident", claimedHandle: handle });
+
+test("a resident's own key is not a placer for its housemates (POS-389)", async () => {
+  const mari = await leave(porch({ slug: "mari-tries" }), ownKey("mari"));
+  assert.equal(mari.code, 403, JSON.stringify(mari));
+  assert.equal(mari.defect, `"solace" is not one of your residents`, "not a placement: the unchanged 403");
+  const named = await leave(porch({ slug: "keeper-names-wright", placed_by: "wright" }), ownKey("worldkeeper"));
+  assert.equal(named.code, 403, JSON.stringify(named));
+  assert.equal(named.defect, `"wright" is not a placer on this key`);
+  assert.equal(named.hint, "this key places as: worldkeeper");
+});
+
 test("consent on one's own resident bounces rather than riding silently", async () => {
   const out = await leave(porch({ slug: "own-porch", by: "illuminator" }), IRIS);
   assert.equal(out.code, 422, JSON.stringify(out));

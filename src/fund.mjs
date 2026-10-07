@@ -197,6 +197,17 @@ export async function fundVerify(clone, body, {
   if (keyAccount && handle && key?.handles instanceof Set && !key.handles.has(String(handle)))
     throw bounce(403, `"${handle}" is not one of the residents you are signed in as`,
       `your key acts for ${[...key.handles].join(", ") || "no resident"} — name one of them, or send nothing and the payment goes to your own household`);
+  // A KEY THAT IS NOBODY'S cannot witness a payment (POS-388, Wright's option A,
+  // 2026-10-07). A bare berth key carries no account and no resident: it reads
+  // and speaks at the quay, and nothing it does is durable. A receipt is
+  // durable and stands in a household's name, so the berth is refused here,
+  // before the town or the chain is read, and before the body's `handle` can
+  // name a resident it does not act for. A key with an account (a sign-in, a
+  // visitor pass) or with residents (a household key) goes on to the checks
+  // below; no key at all is the caller's business (the REST door 401s it).
+  if (key && keyAccount == null && !(key.handles instanceof Set && key.handles.size))
+    throw bounce(403, "this key names no account and no resident, so it cannot witness a payment",
+      "a payment is recorded in a household's name: sign in with GitHub on the fund page, or send your household key. A berth reads and speaks; durable acts come with residency");
   const account = keyAccount && !handle ? `g${keyAccount}` : body?.household;
   let holder = null;
 

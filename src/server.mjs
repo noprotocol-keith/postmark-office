@@ -64,7 +64,7 @@ import { resetGraphCache, worldGraphView, NODE_KINDS, gexfPath } from "./world-g
 import { resetClassFieldsCache } from "./world-frames.mjs"; // the frame law's class read, dropped on a world.db swap
 import { dynamicHealth, dynamicDbPath, dynamicRetired, resetClassCache } from "./dynamic-store.mjs"; // stage 2: the dynamic layer's instrument panel
 import { servedEnterExitLedger, DEPRECATED_DOOR } from "./enter-exit-ledger.mjs"; // the passages, derived from the frozen era + the journal (2026-08-26)
-import { Bouncer, keyIdForToken, worldWriteVerbForRest } from "./bouncer.mjs";
+import { Bouncer, clientIp, keyIdForToken, worldWriteVerbForRest } from "./bouncer.mjs";
 import { loopLag } from "./loop-lag.mjs"; // POS-267: how long the one thread keeps a caller waiting
 import { storeTxnWatch } from "./store-txn-watch.mjs"; // POS-370: does any office connection sit idle inside a transaction
 import { readReleaseStamp } from "./release.mjs"; // POS-60: the deploy receipt the auto-deploy probes
@@ -730,13 +730,8 @@ const setWwwAuth = (res) => {
   res.setHeader("www-authenticate", `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/api/mcp"`);
 };
 
-// nginx fronts us with proxy_add_x_forwarded_for, which APPENDS the real client
-// to whatever the caller sent — so the LAST hop is the trustworthy one (the
-// first is caller-controlled and spoofable past the limit).
-const clientIp = (req) => {
-  const xff = req.headers["x-forwarded-for"];
-  return (xff ? String(xff).split(",").at(-1).trim() : req.socket?.remoteAddress) || "unknown";
-};
+// clientIp (the caller behind nginx, the last X-Forwarded-For hop) lives in
+// bouncer.mjs, beside the buckets keyed on it, so the OAuth desk reads it too.
 
 // ── routes ───────────────────────────────────────────────────────────────────
 // POS-266: the read workers, started once the port is held (below). Null in a

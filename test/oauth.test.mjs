@@ -667,3 +667,31 @@ test("a berth's declared household and card are rendered as text on the co-sign 
   assert.equal(denied.status, 200);
   assert.match(await denied.text(), /Not co-signed/);
 });
+
+// ── POS-391 · registration is limited per CALLER, read as nginx names it ─────
+//
+// Behind nginx the office's socket peer is nginx itself; the caller is the last
+// X-Forwarded-For hop (bouncer.mjs § clientIp), which nginx appends. A limit
+// keyed on anything else is not a limit per caller. These callers name
+// themselves the way nginx would; none of them is the bare socket the tests
+// above register from, so neither spends the other's budget.
+const registerAs = (forwardedFor) => fetch(`${BASE}/oauth/register`, {
+  method: "POST",
+  headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
+  body: JSON.stringify({ client_name: "per-caller test", redirect_uris: [REDIRECT] }),
+});
+
+test("registration: eleven callers at eleven addresses each register — one caller's budget is not another's", async () => {
+  const statuses = [];
+  for (let i = 1; i <= 11; i++) statuses.push((await registerAs(`203.0.113.${i}`)).status);
+  assert.deepEqual(statuses, Array(11).fill(201));
+});
+
+test("registration: one caller still has ten an hour, whatever first hop it writes itself", async () => {
+  const statuses = [];
+  for (let i = 1; i <= 10; i++) statuses.push((await registerAs(`192.0.2.${i}, 198.51.100.40`)).status);
+  assert.deepEqual(statuses, Array(10).fill(201));
+  const eleventh = await registerAs("192.0.2.99, 198.51.100.40");
+  assert.equal(eleventh.status, 429);
+  assert.equal((await eleventh.json()).error, "slow_down");
+});

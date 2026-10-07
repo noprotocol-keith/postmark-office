@@ -143,7 +143,7 @@
    "unit": "postmark-town-index.timer",
    "label": "the town index (office.db's tables in the store)",
    "stage": "live",
-   "activation_owner": "Keemin — ADOPTED at the w41 ship, 2026-10-04 (runbook § 8.2): 033_town_index.sql applied, the seed run by hand, and the timer enabled by Wright at 16:45Z. The READS switch (TOWN_INDEX_READS=store) is a separate act: flipped 16:52Z the same day and rolled back 19:35Z (pool exhaustion; office #346, POS-370). The ingest stays on so the index is current when the switch re-flips.",
+   "activation_owner": "Keemin — ADOPTED at the w41 ship, 2026-10-04 (runbook § 8.2): 033_town_index.sql applied, the seed run by hand, and the timer enabled by Wright at 16:45Z. The READS switch (TOWN_INDEX_READS=store) is a separate act: flipped 10-04 16:52Z and rolled back 19:35Z (pool exhaustion; office #346, POS-370), then re-flipped 10-06 12:13Z with w41.3 and watched four hours clean (switch2-watch). It is ON: every door that reads the town index reads these tables.",
    "cadence": "every 15 minutes at :05/:20/:35/:50 UTC",
    "cadence_source": "systemctl show postmark-town-index.timer -p TimersCalendar — measured on the box 2026-10-07T01:0xZ: '{ OnCalendar=*-*-* *:05,20,35,50:00 UTC }', UnitFileState=enabled, active since 2026-10-04 16:45:19 UTC",
    "heartbeat": {
@@ -152,7 +152,7 @@
     "stamp_field": "at",
     "stale_after_minutes": 45
    },
-   "stale_means": "the store's town_* tables stop following the town. No door reads them while TOWN_INDEX_READS is off; once it is on, every door that reads them serves the town as of the last ingest (the state file names the sha and why). The allowance is three ticks."
+   "stale_means": "the store's town_* tables stop following the town, and with TOWN_INDEX_READS=store (on since 2026-10-06 12:13Z) every door that reads them serves the town as of the last ingest. The state file names the sha and why. The allowance is three ticks."
   },
   {
    "unit": "postmark-harbor-watch.timer",

@@ -268,11 +268,19 @@ export function makeActsPen({ households = [], pins = [], meta = [], claims = []
       return { rows: [{ keys: state.householdKeys.length ? state.householdKeys : null }], rowCount: 1 };
     }
     if (/^UPDATE claims/i.test(q)) return { rows: [], rowCount: 0 };
+    // The candle's lock (POS-404): the door shares it before it reads the open
+    // window. No clearing runs against a stub, so it is granted at once.
+    if (/^SELECT pg_advisory_xact_lock_shared\(/i.test(q)) return { rows: [{}], rowCount: 1 };
 
     // The registry, as `registry-store.mjs`'s three fixed SELECTs ask for it.
     if (/FROM households/i.test(q)) return { rows: households.map((r) => ({ ...r })), rowCount: households.length };
     if (/FROM household_pins/i.test(q)) return { rows: pins.map((r) => ({ ...r })), rowCount: pins.length };
     if (/FROM registry_meta/i.test(q)) return { rows: meta.map((r) => ({ ...r })), rowCount: meta.length };
+    // The standing gate (POS-347) asks the record before every act: this
+    // record has suspended nobody.
+    if (/FROM standing_acts/i.test(q)) return { rows: [], rowCount: 0 };
+    // …and has never raised the gangway (POS-353).
+    if (/FROM gangway_acts/i.test(q)) return { rows: [], rowCount: 0 };
 
     for (const [matcher, handler] of also) {
       const hit = typeof matcher === "function" ? matcher(q, params) : matcher.test(q);

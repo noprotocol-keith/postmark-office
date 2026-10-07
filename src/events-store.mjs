@@ -32,6 +32,8 @@
 
 import { officeRead, officeWrite, insertAct, PenUnreachableError } from "./world2-pen.mjs";
 import { householdKeyFor } from "./world2-claims.mjs";
+import { holdsHand } from "./named-hand.mjs";
+import { sessionKeysVia } from "./household-deriver.mjs";
 import { currentCrossing } from "./crossings.mjs";
 import { wakesNote, earpieceEnabled } from "./earpiece.mjs";
 import { WORLD_ANCHOR } from "./world-journal.mjs";
@@ -181,10 +183,16 @@ async function updatePost(client, r) {
      r.starts, r.ends, r.state, JSON.stringify(r.fields ?? {}), r.revised, r.last_act]);
 }
 
-/** May this resident change this event? Anyone in the host's household. */
+/**
+ * May this resident change this event? Anyone in the host's household.
+ *
+ * The house, whichever spelling the post was written under (RULING 4): the row
+ * keeps its spelling for life, so a house renamed after its host posted reaches
+ * the post through its spelling set, the one 024's policies compare against.
+ */
 async function mayChange(client, prev, handle) {
   const hh = await householdKeyFor(client, handle);
-  if (prev.author !== handle && (prev.household == null || prev.household !== hh))
+  if (prev.author !== handle && (prev.household == null || !(await sessionKeysVia(client, hh)).includes(prev.household)))
     throw refuse(403, `"${prev.id}" is not yours to change`, `its host is ${prev.author}; only the host's household may amend or cancel it`);
 }
 
@@ -581,7 +589,7 @@ async function amendBug(fields, key, id, { now, env }) {
   return write(async (client) => {
     const prev = await bugRow(client, id);
     if (!prev) throw refuse(404, `no bug "${id}"`, 'town { read: "posts", args: { class: "bug" } } lists them');
-    const isHand = BUG_HANDS.includes(acting);
+    const isHand = BUG_HANDS.includes(acting) && holdsHand(key, acting); // POS-389: this credential's own hand
     // A finished bug takes one amendment only: a hand linking its discussion (issue), at any stage.
     const onlyIssue = Object.keys(text.fields).length === 1 && text.fields.issue !== undefined && text.title === undefined && text.body === undefined;
     if (BUG_FINISHED.includes(prev.state) && !(isHand && onlyIssue))
@@ -623,7 +631,9 @@ async function advanceBug(fields, key, id, { now, env, roll }) {
       throw refuse(404, `no bug "${j.of}" to be a duplicate of`, 'of: a standing bug post — town { read: "posts", args: { class: "bug" } } lists them', { field: "of" });
     // The critter's namer is the fix's credit, kept beside the name so the post says who named it.
     const set = { ...(j.size ? { size: j.size } : {}), ...(j.critter ? { critter: j.critter, named_by: j.credit } : {}),
-      ...(j.grade ? { grade: j.grade } : {}), ...(j.of ? { of: j.of } : {}) };
+      ...(j.grade ? { grade: j.grade } : {}), ...(j.of ? { of: j.of } : {}),
+      // The link is kept per stage; the act carries the post's whole map after it, as the reveal does.
+      ...(j.link ? { links: { ...(prev.fields?.links ?? {}), [j.to]: j.link } } : {}) };
     const payload = { post: id, from: prev.state, to: j.to, ...(j.credit ? { credit: j.credit } : {}),
       ...(Object.keys(set).length ? { fields: set } : {}), hand };
     const actId = await insertAct(client, bugActRow({ action: ACT_ADVANCE, actor: hand, object: id, payload, now }));
@@ -638,8 +648,8 @@ async function advanceBug(fields, key, id, { now, env, roll }) {
       ? `the ladder owes ${j.credit} ${n} stamps for ${j.to}, paid by the reviewed stage pass (not by this act), subject to the town's meep law and, at confirmed, three paid reports per household a week`
       : `${j.to} pays nothing`;
     return { post: bugAnswer(row), act_id: actId, hand, stage: j.to, ...(j.credit ? { credit: j.credit } : {}), stamps: n,
-      ...(j.critter ? { critter: j.critter } : {}),
-      receipt: `advanced: ${id} ${prev.state} → ${j.to} by ${hand}'s hand; ${pays}${skipped.length ? `; skipped ${skipped.join(", ")}, and a skipped stage pays nothing` : ""}${j.critter ? `; its critter is "${j.critter}", named by ${j.credit}` : ""}`,
+      ...(j.critter ? { critter: j.critter } : {}), ...(j.link ? { link: j.link } : {}),
+      receipt: `advanced: ${id} ${prev.state} → ${j.to} by ${hand}'s hand; ${pays}${skipped.length ? `; skipped ${skipped.join(", ")}, and a skipped stage pays nothing` : ""}${j.critter ? `; its critter is "${j.critter}", named by ${j.credit}` : ""}${j.link ? `; ${j.to} points at ${j.link}` : ""}`,
       read: bugReadHint(id) };
   }, env);
 }

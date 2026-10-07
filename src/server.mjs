@@ -24,28 +24,28 @@ import { updateAddressBody, updateAddressFields, updateHome, updateHomeImage, up
 import { handleMcp, callTool, TOOLS as MCP_TOOLS, validateArgs, visitorBounces, VISITOR_BOUNCE } from "./mcp.mjs";
 // POS-70 box 1: every plain-API write route is judged by the act it performs,
 // against that act's own schema, in the apexes' own sentence (src/one-contract.mjs).
-import { judgeRoute, withRenamed, PATCH_PAPER_DOORS } from "./one-contract.mjs";
+import { judgeRoute, withRenamed, PATCH_PAPER_DOORS, markRefused } from "./one-contract.mjs";
 import { sendAtDoor } from "./send-at-door.mjs";
 import { TOWN_TOOL, townDispatchToolFor } from "./town-apex.mjs";
 import { householdApex, APEX_ONLY_FIELDS } from "./household-apex.mjs"; // the third door (2026-08-15)
-import { handleOauth, oauthLookup, oauthSchema, mintHouseholdKey, keyLookup, mintBerth, berthLookup, berthTaken, acknowledgeVisitorRules, BERTH_SLUG, FROM_TOWN, mintClaim, claimLookup, claimState, claimCosignUrlFor, claimStateUrlFor, sweepClaims } from "./oauth.mjs";
+import { handleOauth, oauthLookup, oauthSchema, mintHouseholdKey, keyLookup, mintBerth, berthLookup, berthTaken, acknowledgeVisitorRules, BERTH_SLUG, FROM_TOWN, mintClaim, claimLookup, claimState, claimCosignUrlFor, claimStateUrlFor, sweepClaims, SignInUnreadable } from "./oauth.mjs";
 import { requestResidency, isReservedHandle } from "./residency.mjs";
 import { declareViaOffice, SETTLING_ASHORE } from "./declare.mjs";
 import { uploadMedia } from "./media.mjs";
 import { harborGated, HARBOR_BOUNCE } from "./harbor-gate.mjs";
 import { VISITOR_RULES, useRulesRecorder } from "./visitor-rules.mjs"; // POS-300
-import { standingBounce, standingOf, isSuspended, bounceSentence, STANDING_BOUNCE_CODE } from "./standing.mjs";
+import { standingBounce, standingOf, isSuspended, bounceSentence, STANDING_BOUNCE_CODE, STANDING_UNREADABLE } from "./standing.mjs";
 import { rolesSchema, roleGate, roleGatesOn, ROLE_SUBSCRIBER } from "./roles.mjs";
 import { openPaper, paperworkStoreOn } from "./paperwork.mjs"; // POS-271: sign-in, roles, the media ledger and the town log, one door
 import { arrivalPage } from "./arrival.mjs";
-import { townSummary, residentList, residentPage, resident, mailList, letter, search, bulletinList, bulletinEntry, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, regionOne, home, identityOf, repoLog } from "./queries.mjs";
-import { householdOf } from "./households.mjs";
+import { townSummary, residentList, residentPage, resident, mailList, letter, search, bulletinList, bulletinEntry, townLedger, townDocs, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, regionOne, home, identityOf, repoLog } from "./queries.mjs";
+import { householdsFor, withHouseholdBlock } from "./households.mjs";
 import * as townIndexStore from "./town-index-store.mjs"; // the office.db readers moved to the store (POS-268)
 import { probeOf, isUnreachable } from "./index-probe.mjs"; // the write path's questions of the index, office.db's or the store's (POS-268)
 const { townIndexReads } = townIndexStore;
 import { votesAvailable, voteList, voteView, stakeViaOffice } from "./votes.mjs";
 import { doorstepBundle } from "./doorstep-bundle.mjs"; // the doorstep, finished — one implementation, three doors
-import { giftViaOffice, isPrincipal } from "./ops.mjs";
+import { giftViaOffice, isPrincipal, principalNow, startPrincipalRefresher } from "./ops.mjs";
 import { fundVerifyViaOffice, intakeDisclosure, POT_RE as FUND_POT_RE, INTAKE as FUND_INTAKE } from "./fund.mjs";
 import { channelOf, countAct, actsByChannel } from "./channel.mjs";
 import { logAccess } from "./telemetry.mjs";
@@ -64,7 +64,7 @@ import { resetGraphCache, worldGraphView, NODE_KINDS, gexfPath } from "./world-g
 import { resetClassFieldsCache } from "./world-frames.mjs"; // the frame law's class read, dropped on a world.db swap
 import { dynamicHealth, dynamicDbPath, dynamicRetired, resetClassCache } from "./dynamic-store.mjs"; // stage 2: the dynamic layer's instrument panel
 import { servedEnterExitLedger, DEPRECATED_DOOR } from "./enter-exit-ledger.mjs"; // the passages, derived from the frozen era + the journal (2026-08-26)
-import { Bouncer, keyIdForToken, worldWriteVerbForRest } from "./bouncer.mjs";
+import { Bouncer, clientIp, keyIdForToken, worldWriteVerbForRest } from "./bouncer.mjs";
 import { loopLag } from "./loop-lag.mjs"; // POS-267: how long the one thread keeps a caller waiting
 import { storeTxnWatch } from "./store-txn-watch.mjs"; // POS-370: does any office connection sit idle inside a transaction
 import { readReleaseStamp } from "./release.mjs"; // POS-60: the deploy receipt the auto-deploy probes
@@ -611,8 +611,13 @@ const withBounceCode = (code, obj) =>
     && !Object.prototype.hasOwnProperty.call(obj, "code")
     ? (({ error, ...rest }) => ({ error, code, ...rest }))(obj)
     : obj;
+// EVERY REFUSAL SAYS SO (POS-427, Darko's option B), here for the same reason
+// the code is: every REST answer is written here. A status of 400 or more is a
+// refusal whatever verb answered it, so its body carries `refused: true`
+// (beside `did`, else last; one-contract.mjs § markRefused, never twice).
 const j = (res, code, obj) => {
   obj = withBounceCode(code, obj);
+  if (code >= 400) obj = markRefused(obj);
   const body = JSON.stringify(obj, null, 1);
   const headers = {
     "content-type": "application/json; charset=utf-8",
@@ -725,13 +730,8 @@ const setWwwAuth = (res) => {
   res.setHeader("www-authenticate", `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/api/mcp"`);
 };
 
-// nginx fronts us with proxy_add_x_forwarded_for, which APPENDS the real client
-// to whatever the caller sent — so the LAST hop is the trustworthy one (the
-// first is caller-controlled and spoofable past the limit).
-const clientIp = (req) => {
-  const xff = req.headers["x-forwarded-for"];
-  return (xff ? String(xff).split(",").at(-1).trim() : req.socket?.remoteAddress) || "unknown";
-};
+// clientIp (the caller behind nginx, the last X-Forwarded-For hop) lives in
+// bouncer.mjs, beside the buckets keyed on it, so the OAuth desk reads it too.
 
 // ── routes ───────────────────────────────────────────────────────────────────
 // POS-266: the read workers, started once the port is held (below). Null in a
@@ -741,7 +741,10 @@ let readPool = null;
 // `route` is the office's one request handler; `handle` (below it) resolves the
 // bearer credential first and hands it in, because since POS-271 the lookup is a
 // read of the paperwork and may be a round trip to the store.
-const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
+// ASYNC since POS-347: the standing gate reads the store. `handle` below
+// catches every route's rejection, so a throw anywhere in here answers 500
+// instead of escaping the request listener.
+const route = async (req, res, resolvedKey = null, t0 = Date.now()) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
@@ -885,7 +888,7 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
         "/doorstep/{handle}", "/metrics/mail", "/repo/log", "/regions", "/regions/{slug}", "/homes/{handle}", "/stamps",
         "/stamps/{handle}", "/quests/{handle}", "/votes", "/votes/{topic}", "/bulletin", "/search?q=", "/calendar", "/calendar/{host}/{slug}", "/posts?class=", "/posts/{author}/{slug}", "/world/find?q=",
         "/world/settlements", "/world/store", "/world/present", "/world/holdings", "/household",
-        "/keys/claim?handle=", "/berth",
+        "/keys/claim?handle=", "/berth", "/households[?h=a,b]",
         "/release"],
       writes: ["POST /letters", "POST /votes/stake", "POST /residency", "POST /households", "POST /berth", "POST /keys", "POST /keys/claim",
         "POST /media", "POST /household", "POST /world/marks", "POST /world/walks", "POST /world/say",
@@ -1007,7 +1010,9 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
         // that mints for a suspended resident and only refuses them afterwards
         // is not the door the ledger was promised. Refused here with the
         // ledger's own sentence, which is the one a resident can act on.
-        const stand = standingOf(handle, TOWN_CLONE);
+        let stand;
+        try { stand = await standingOf(handle); }
+        catch { return bounce(res, STANDING_UNREADABLE.code, STANDING_UNREADABLE.defect, STANDING_UNREADABLE.hint); }
         if (isSuspended(stand))
           return bounce(res, STANDING_BOUNCE_CODE,
             stand.state === "revoked"
@@ -1215,7 +1220,7 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
     // fresh key, is the act the audit exists to hold. A visitor or a berth
     // carries no handles, so the gate never fires on the genuinely arriving.
     if (req.method !== "GET" && path !== "/household" && path !== "/world/apex" && path !== "/town/apex") {
-      const st = standingBounce(key, TOWN_CLONE);
+      const st = await standingBounce(key);
       if (st) return bounce(res, st.code, st.defect, st.hint);
     }
   }
@@ -1278,16 +1283,20 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
     if (!key) { setWwwAuth(res); return bounce(res, 401, "no key at the door", "GET /me tells you who you are at this door — sign in first. Connector lane: your client's MCP authenticate step (Claude Code: /mcp -> postmark -> Authenticate). Shell lane: Authorization: Bearer <household-key>. Guide: https://postmark.town/join/"); }
     const me = identityOf(key);
     // the registry view per handle — household is the primary column (2026-08-07)
-    try { if (me?.handles) { const hh = Object.fromEntries(me.handles.map((h) => [h, householdOf(h)])); if (Object.values(hh).some(Boolean)) me.households = hh; } } catch { /* garnish only */ }
     // POS-317: the household a payment by this account goes in, and the one
     // resident who holds its stamps, from the SAME function the payment watchers
     // resolve the minted reference through (src/fund-holder.mjs). The fund page
     // shows "for <household name>" from this. Garnish: absent, the page offers
     // the payment as an outside gift, which is what the watcher would make of it.
-    if (key.ghId == null) return j(res, 200, me);
-    return import("./fund-holder.mjs").then(({ fundHolderAtOffice }) => fundHolderAtOffice(TOWN_CLONE, key.ghId))
-      .then((h) => j(res, 200, h ? { ...me, fund_holder: { household: h.household, name: h.name, handle: h.handle, rule: h.rule } } : me))
-      .catch(() => j(res, 200, me));
+    // The household blocks come from the store's registry (POS-342); a store
+    // that cannot be asked leaves them off, as before.
+    return householdsFor(me?.handles ?? []).catch(() => null).then((hh) => {
+      if (hh) me.households = hh;
+      if (key.ghId == null) return j(res, 200, me);
+      return import("./fund-holder.mjs").then(({ fundHolderAtOffice }) => fundHolderAtOffice(TOWN_CLONE, key.ghId))
+        .then((h) => j(res, 200, h ? { ...me, fund_holder: { household: h.household, name: h.name, handle: h.handle, rule: h.rule } } : me))
+        .catch(() => j(res, 200, me));
+    });
   }
 
   try {
@@ -1297,7 +1306,15 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
       // GET /join — the arrival page, machine-readable. Deliberately the very
       // first read: it is the one door an agent finds before it has anything,
       // and it must answer with no key, no sign-in and no prior knowledge.
-      if (path === "/join") return j(res, 200, arrivalPage(TOWN_CLONE));
+      if (path === "/join") return j(res, 200, await arrivalPage(TOWN_CLONE));
+      // GET /households — the household registry as the STORE holds it, in the
+      // shape of the town's two printouts (POS-345; contract in households-read.mjs).
+      if (path === "/households") {
+        return import("./households-read.mjs")
+          .then(({ householdsRead }) => householdsRead(Object.fromEntries(url.searchParams.entries())))
+          .then(({ status, body }) => j(res, status, body))
+          .catch((e) => bounce(res, 500, "the households read tripped", String(e?.message ?? e).slice(0, 200)));
+      }
       if (path === "/town") {
         if (townIndexReads()) return fromTownIndex(res, (c) => townIndexStore.townSummary(c));
         return j(res, 200, townSummary(db, meta));
@@ -1681,6 +1698,15 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
       }
       // keyless identity probe — read-side: powers the viewer's dev-dials gate + stand-at filter
       if (path === "/ops/whoami") return j(res, 200, whoami(key));
+      // POS-352: the crossings' receipts, from the store (crossing_receipts, 061).
+      if (path === "/crossings/receipts") {
+        const { receiptsRead } = await import("./crossing-receipts.mjs");
+        try { return j(res, 200, await receiptsRead(url.searchParams)); }
+        catch (e) {
+          if (e.code) return bounce(res, e.code, e.defect, e.hint);
+          return bounce(res, 503, "the office cannot read the crossings' receipts right now", "nothing about the crossings changed; ask again shortly");
+        }
+      }
 
       // ── THE ROSTER DOOR PAGES (2026-09-10, the 10x read's third row) ──────
       //
@@ -1728,6 +1754,8 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
           r = got.out;
         } else r = resident(db, who, fresh);
         if (!r) return bounce(res, 404, `no resident "${who}"`, "handles are lowercase-hyphenated, as in WHITE_PAGES/");
+        // household leads (2026-08-07), from the store's registry (POS-342)
+        await withHouseholdBlock(r, who);
         // ── WHAT THIS RESIDENT MADE, on the REST skin too ────────────────────
         //
         // BOTH SKINS OR NEITHER. This is the route the SITE builds its resident
@@ -1964,7 +1992,13 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
       // GET /votes and /votes/{topic} — the ballot box, public. With a key,
       // /votes/{topic} adds your household's remaining headroom per candidate.
       if (path === "/votes" || (m = /^\/votes\/([a-z0-9-]+)$/.exec(path))) {
-        if (!canWrite || !votesAvailable(TOWN_CLONE))
+        // A READ, SO IT ASKS ONLY FOR THE ENGINE, NEVER FOR THE PEN (#3383).
+        // Since POS-266 every GET is answered by a read worker, and a worker
+        // is never `canWrite` (see the note at `canWrite`), so the old
+        // `!canWrite ||` here answered 409 to the whole town while the
+        // worker's clone held the engine. The stake (POST /votes/stake) is a
+        // write and keeps its `canWrite` gate.
+        if (!votesAvailable(TOWN_CLONE))
           return bounce(res, 409, "not-yet-open", "the office has no town clone with the ballot engine");
         const p = path === "/votes"
           ? voteList(TOWN_CLONE).then((v) => j(res, 200, v))
@@ -1986,7 +2020,8 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
       if ((m = /^\/stamps\/([a-z0-9-]+)$/.exec(path))) {
         const handle = m[1];
         if (townIndexReads()) return fromTownIndex(res, async (c) => ({ handle, ...(await townIndexStore.stampsDetail(c, handle)) }));
-        return j(res, 200, { handle, ...stampsDetail(db, handle) });
+        return stampsDetail(db, handle).then((d) => j(res, 200, { handle, ...d }))
+          .catch((e) => bounce(res, 500, "the stamps read tripped", String(e?.message ?? e).slice(0, 200)));
       }
 
       // quest board for one resident (registry × today's progress). The handle
@@ -2003,6 +2038,17 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
       if (path === "/bulletin") {
         if (townIndexReads()) return fromTownIndex(res, (c) => townIndexStore.bulletinList(c));
         return j(res, 200, bulletinList(db));
+      }
+
+      // POS-351: the town's mail ledger and docs, so the site's ledger.json and
+      // docs.json come through the office and never from a town checkout.
+      if (path === "/town/ledger") {
+        if (townIndexReads()) return fromTownIndex(res, (c) => townIndexStore.townLedger(c));
+        return j(res, 200, townLedger(db));
+      }
+      if (path === "/town/docs") {
+        if (townIndexReads()) return fromTownIndex(res, (c) => townIndexStore.townDocs(c));
+        return j(res, 200, townDocs(db));
       }
 
       if ((m = /^\/bulletin\/([a-z0-9-]+)$/.exec(path))) {
@@ -2234,7 +2280,7 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
           // A visitor's act, decided by the verb it resolves to — the same
           // decision and the same words as the MCP door (postmark#2816 sweep).
           if (visitorBounces("household", payload, key)) return bounce(res, 403, VISITOR_BOUNCE.defect, VISITOR_BOUNCE.hint);
-          const r = await householdApex(payload, key, { db, clone: TOWN_CLONE, odb, dbPath: DB_PATH, pen: PEN, canWrite, meta, asOf: AS_OF, schemas: flatPropsFromTools(), schemaRequired: flatRequiredFromTools(), channel, strictFields: true, worldWriteBudget: (household) => bouncer.worldWriteBudget(household) });
+          const r = await householdApex(payload, key, { db, clone: TOWN_CLONE, odb, dbPath: DB_PATH, pen: PEN, rdb, canWrite, meta, asOf: AS_OF, schemas: flatPropsFromTools(), schemaRequired: flatRequiredFromTools(), channel, strictFields: true, worldWriteBudget: (household) => bouncer.worldWriteBudget(household) });
           return j(res, r?.error ? (r.code ?? 400) : 200, r);
         } catch (e) {
           if (e instanceof SyntaxError) return bounce(res, 400, "body is not JSON", '{"do": "begin", "args": { "household": "…", "card": "…" }}');
@@ -2328,7 +2374,9 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
     // under the flock. The office is the WALL: principal-only, checked here (the
     // /ops/ site page is only presentation). by: + date are server-derived.
     if (req.method === "POST" && path === "/ops/gift") {
-      if (!isPrincipal(key))
+      // The spending door asks the role registry NOW (POS-352): a revoke lands
+      // at the next call, never at the next refresh.
+      if (!(await principalNow(rdb, key)))
         return bounce(res, 403, "the ops desk is the principal's", "this desk mints founder gifts and answers only to Keemin's GitHub sign-in");
       if (!canWrite)
         return bounce(res, 409, "not-yet-open", "the office has no town clone configured; the desk is dark");
@@ -2398,7 +2446,7 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
             // and the standing gate, inside the `do:` branch for the same
             // reason the harbor's is: the bare and `read:` shapes of this route
             // are reads, and reads are never suspended.
-            const st = standingBounce(key, TOWN_CLONE);
+            const st = await standingBounce(key);
             if (st) return bounce(res, st.code, st.defect, st.hint);
           }
           // The SAME validator the MCP door runs, against the SAME tool schema —
@@ -2604,11 +2652,15 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
 
     // ── POST /fund/verify — the seam's public door (S3, USDC rail) ───────────
     // A patron's tx hash becomes a witnessed pot receipt, or a refusal they are
-    // owed verbatim. DELIBERATELY UNCREDENTIALED: the witness is the payment
-    // itself, on a public chain, to one published address — a key would gate
-    // who may TELL the town about a dollar it already holds, which protects
-    // nothing and loses real money. Every abuse this opens is already refused
-    // downstream: a hash that paid someone else fails the witness, a replayed
+    // owed verbatim. CREDENTIALED, BY POSITION: this route sits below the
+    // write tier's `if (!key)` above, so a call with no key is answered 401
+    // there and never reaches it (so it has been since the door was built,
+    // 2026-08-21; an earlier version of this comment said "deliberately
+    // uncredentialed", and the gate never agreed). Every caller here pays its
+    // key's write bucket. A key that names no account and no resident (a bare
+    // berth) is refused in fundVerify before the chain is asked (POS-388): a
+    // receipt is durable and in a household's name, and a berth has neither.
+    // The rest is refused downstream: a hash that paid someone else fails the witness, a replayed
     // hash fails the ledger's ref uniqueness, a hash aimed past a pot's need
     // fails D5, and a handle the town does not keep fails before the chain is
     // even consulted. What it cannot stop is someone naming a pot the payer did
@@ -2645,6 +2697,12 @@ const route = (req, res, resolvedKey = null, t0 = Date.now()) => {
 // just means "anonymous": a stale token never locks someone out of a public
 // read; only writes require a valid key. A static key answers from memory and
 // never waits; every other shape is a read of the paperwork.
+//
+// ONE FAILURE IS NOT ANONYMOUS (POS-343): a live credential whose household
+// the store's pins could not be read for. That is not "this token is stale",
+// it is "the office cannot say who you are", and serving it as nobody would
+// hand a signed-in resident a visitor's answer with no word why. It is refused
+// with a 503 that names it.
 const resolveBearer = async (token) =>
   (await oauthLookup(odb, db, TOWN_CLONE, token)) ?? (await keyLookup(odb, db, TOWN_CLONE, token))
   ?? (await claimLookup(odb, db, TOWN_CLONE, token)) ?? (await berthLookup(odb, db, TOWN_CLONE, token)) ?? null;
@@ -2652,15 +2710,19 @@ const resolveBearer = async (token) =>
 const handle = (req, res) => {
   const t0 = Date.now();
   const auth = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? "");
-  if (!auth) return route(req, res, null, t0);
+  const tripped = (e) => { if (!res.headersSent) bounce(res, 500, "the office tripped", String(e?.message ?? e).slice(0, 200)); };
+  if (!auth) return route(req, res, null, t0).catch(tripped);
   const fixed = KEYS.get(auth[1]);
-  if (fixed) return route(req, res, fixed, t0);
-  resolveBearer(auth[1]).catch(() => null)
-    .then((key) => route(req, res, key, t0))
-    .catch((e) => { if (!res.headersSent) bounce(res, 500, "the office tripped", String(e?.message ?? e).slice(0, 200)); });
+  if (fixed) return route(req, res, fixed, t0).catch(tripped);
+  resolveBearer(auth[1]).then((key) => key, (e) => (e instanceof SignInUnreadable ? e : null))
+    .then((key) => (key instanceof SignInUnreadable ? bounce(res, 503, key.defect, key.hint) : route(req, res, key, t0)))
+    .catch(tripped);
 };
 
 import("./world-refresher.mjs").then((m) => m.startWorldRefresher(WORLD_CLONE)); // POS-263: the world clone's git answered off the request path
+// POS-352: the principal is a role row; the describing flags read this set,
+// reloaded from the registry every minute in every process.
+startPrincipalRefresher(rdb);
 // POS-270: the class layer from law_projection at the newest blessing, off the
 // request path. The main thread polls and announces a move; a read worker loads
 // once at boot and again on each announcement, so every process serves one law.

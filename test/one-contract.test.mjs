@@ -536,3 +536,27 @@ test("settlement · a berth is told the one clause at both of its doors — POST
     assert.doesNotMatch(String(text), /Registrar's gate|honored in boarded order/, `${what} still names a gate the law says is not one`);
   }
 });
+
+test("POS-427 · withRefused marks a bounce once, beside did (else last), and leaves everything else alone", async () => {
+  const { withRefused } = await import("../src/one-contract.mjs");
+  const acted = withRefused({ error: "bounce", code: 422, defect: "d", hint: "h", did: "say", dispatched_to: "world_say" });
+  assert.deepEqual(Object.keys(acted), ["error", "code", "defect", "hint", "did", "refused", "dispatched_to"]);
+  assert.equal(acted.refused, true);
+  const plain = withRefused({ error: "bounce", code: 403, defect: "d", hint: "h" });
+  assert.deepEqual(Object.keys(plain), ["error", "code", "defect", "hint", "refused"], "the pinned leading keys do not move");
+  const twice = withRefused(withRefused({ error: "bounce", did: "x", defect: "d" }));
+  assert.deepEqual(Object.keys(twice), ["error", "did", "refused", "defect"], "marked once, never twice");
+  const ok = { did: "say", result: { spoke: true } };
+  assert.equal(withRefused(ok), ok, "a success passes through as the same object");
+  for (const other of [null, undefined, "text", [1], { error: "unavailable" }]) assert.equal(withRefused(other), other);
+});
+
+test("POS-427 B · markRefused marks any refusal body the doors send, whatever its error word; withRefused stays bounce-only", async () => {
+  const { markRefused, withRefused } = await import("../src/one-contract.mjs");
+  const rate = markRefused({ error: "rate", defect: "slow down", retry_after_s: 3 });
+  assert.deepEqual(Object.keys(rate), ["error", "defect", "retry_after_s", "refused"]);
+  const marked = markRefused({ error: "bounce", did: "say", defect: "d" });
+  assert.equal(markRefused(marked), marked, "a marked body is returned as it is");
+  assert.equal(withRefused({ error: "rate" }).refused, undefined, "the apex marks bounces only");
+  for (const other of [null, undefined, "text", [1]]) assert.equal(markRefused(other), other);
+});

@@ -23,6 +23,11 @@ set -eu
 LOCK="${TOWN_LOCK:-/srv/postmark-office/town.lock}"
 SNAP="$(mktemp -d /tmp/postmark-tick.XXXXXX)"
 trap 'rm -rf "$SNAP"' EXIT
+# THE STORE'S REGISTRY for the town's tools this tick runs (POS-345): they read
+# `--registry "$REGISTRY_FILE"`, never the printed tools/households.json and
+# tools/github-ids.json. Written inside the flock below; when the store cannot be
+# read nothing is written, and each tool handed the path refuses by name.
+REGISTRY_FILE="$SNAP/registry.json"
 
 # ── under the lock: mutate + snapshot (seconds) ──────────────────────────────
 # The world clone gets FETCH, never pull: its checkout is the write pen's
@@ -35,6 +40,8 @@ trap 'rm -rf "$SNAP"' EXIT
   flock -w 300 9
   git -C "$TOWN_CLONE" pull --ff-only -q
   git -C "$WORLD_CLONE" fetch --prune -q origin
+  node /srv/postmark-office/deploy/registry-file.mjs "$REGISTRY_FILE" \
+    || echo "[office-keep] the store's registry could not be read — every town check below that needs it refuses this tick, by name" >&2
   # settle-on-tick (Keemin, 2026-09-29; overturns #3231's "no timer"): every
   # join merged since the last tick is bound here — the pen's residency/* and
   # hand-written single-address joins — BEFORE the mint catch-up and the
@@ -46,6 +53,21 @@ trap 'rm -rf "$SNAP"' EXIT
   node /srv/postmark-office/deploy/settle-pass.mjs \
       --town "$TOWN_CLONE" --cursor /srv/postmark-office/settle-pass.cursor \
     || echo "[office-keep] settle pass FAILED (non-fatal) — the lines above name why; the next tick asks again from the same cursor" >&2
+  # standing-on-tick (POS-347, 2026-10-04): the standing ledger is a store
+  # table now (standing_acts, 060) and tools/standing-ledger.md its export. The
+  # drain adopts any line committed to the file by hand (the store reads git),
+  # then renders the file from the store and commits it only when it differs.
+  # The Registrar's door renders in its own act; this catches a hand line, and
+  # a door act whose push was lost. NON-FATAL: the doors read the store, not the
+  # file, so a drain that cannot run leaves only the export (the witness's copy)
+  # one tick behind, and the next tick asks again.
+  node /srv/postmark-office/tools/standing-drain.mjs --apply --clone "$TOWN_CLONE" \
+    || echo "[office-keep] standing drain FAILED (non-fatal) — the line above names why; the doors read the store and are unaffected" >&2
+  # gangway-on-tick (POS-353): the same shape for HARBOR/GANGWAY.md — a
+  # founder commit to the file is adopted, then the file is rendered from the
+  # store. Non-fatal: every arrival road reads the store, not the file.
+  node /srv/postmark-office/tools/gangway-drain.mjs --apply --clone "$TOWN_CLONE" \
+    || echo "[office-keep] gangway drain FAILED (non-fatal) — the line above names why; the arrival roads read the store and are unaffected" >&2
   # mint-on-tick (2026-08-06): a MANUAL crossing delivers without minting (the
   # key is box custody), opening an owed-window that used to last until the
   # next automated crossing — and a settlement landing inside it refuses
@@ -98,7 +120,7 @@ trap 'rm -rf "$SNAP"' EXIT
   # a local commit, exactly as it did before this block.
   ( cd "$TOWN_CLONE" || exit 1
     LEDGER=WHITE_PAGES/stamp-ledger.md
-    if ! node tools/stamp-verify.mjs; then
+    if ! node tools/stamp-verify.mjs --registry "$REGISTRY_FILE"; then
       echo "[office-keep] mint catch-up OFF — the ledger arrived red (stamp-verify above names the line), so this tick appended nothing; the catch-up resumes on the first tick that finds it green" >&2
       exit 0
     fi
@@ -131,8 +153,17 @@ trap 'rm -rf "$SNAP"' EXIT
     node /srv/postmark-office/deploy/welcome-pass.mjs \
         --town "$TOWN_CLONE" --key /srv/postmark-office/stamp-key.pem \
       || echo "[office-keep] welcome pass had refusals (non-fatal) — the lines above name each one; the household keeps its claim and the next crossing asks again" >&2
+    # The bug ladder's stage pass (Darko, 2026-10-07: payment "rides on the
+    # acceptance"). Every stage an advance recorded and the ledger has not paid
+    # is minted through the town's own --stage-mint verb, one line per post and
+    # stage, ever; the cap and the meep law are the town's. The resident hears
+    # what was paid and why from the Bug Catcher's next round, which reads these
+    # post:<id>/<stage> lines (MEEPS/SKILLS/bugcatcher-round.md).
+    node /srv/postmark-office/tools/bug-stage-plan.mjs \
+        --town "$TOWN_CLONE" --apply --quiet --key /srv/postmark-office/stamp-key.pem \
+      || echo "[office-keep] bug stage pass had refusals (non-fatal) — the lines above name each one; the stage stays owed and the next tick pays it" >&2
     if ! cmp -s "$LEDGER" "$HOLD/ledger.arrived"; then
-      node tools/stamp-verify.mjs || exit 1
+      node tools/stamp-verify.mjs --registry "$REGISTRY_FILE" || exit 1
     fi
     if ! git diff --quiet -- "$LEDGER"; then
       git add "$LEDGER" && git commit -qm "mint: tick catch-up pass" || exit 1
@@ -188,7 +219,7 @@ fi
 # JSON (the tool absent or crashed) still writes a line, `checked: false`, so
 # "did not run" never reads like "found nothing".
 HK_LOG="${HOUSEHOLD_KEYS_LOG:-/srv/postmark-harbor/household-keys.jsonl}"
-hk_out="$(node "$SNAP/town/tools/household-keys.mjs" --json --repo "$SNAP/town" 2>&1)" || true
+hk_out="$(node "$SNAP/town/tools/household-keys.mjs" --json --repo "$SNAP/town" --registry "$REGISTRY_FILE" 2>&1)" || true
 if node -e '
   const text = process.argv[1] ?? "";
   let j = null;

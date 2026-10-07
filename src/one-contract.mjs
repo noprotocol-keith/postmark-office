@@ -155,30 +155,37 @@ export function withRenamed(result, renamed) {
 }
 
 /**
- * A REFUSAL SAYS SO BESIDE `did` (POS-427, Darko's ruling 2026-10-06, option b).
+ * EVERY REFUSAL SAYS SO (POS-427, Darko's rulings 2026-10-06: option b, then B).
  *
  * A refused act keeps `did:` (and `dispatched_to`, and the terms it was shown),
  * because callers read that shape today. So an agent skimming `did` and
  * `result` read a refused say as "did say, empty result" (Seven Verity's
- * report). Dropping `did` was option (a), and it was rejected. This adds
- * `refused: true` instead: beside `did` where the body carries one, else
- * last, because a bounce's leading keys are pinned (error, code, defect, hint;
- * one-contract.test.mjs § bounce code). Each apex answers through this once,
- * at its own entry, so every bounce it composes is marked, whether the handler
- * returned it or threw it into the apex's catch. A successful answer passes
- * through untouched and never carries `refused`.
+ * report). Dropping `did` was option (a), and it was rejected. A refusal
+ * carries `refused: true` instead: beside `did` where the body carries one,
+ * else last, because a bounce's leading keys are pinned (error, code, defect,
+ * hint; one-contract.test.mjs § bounce code). A body already marked is
+ * returned as it is, so the doors never mark twice.
+ *
+ * WHO CALLS IT. The doors, at the one place each sends a refusal: the MCP
+ * door's every `isError` answer (mcp.mjs § refusal) and every REST answer
+ * with a status of 400 or more (server.mjs § j). The apexes too, at their own
+ * entries, through `withRefused`, so an in-process caller of an apex reads
+ * the same body the doors serve. A successful answer is never marked.
  */
-export function withRefused(answer) {
-  if (!answer || typeof answer !== "object" || Array.isArray(answer) || answer.error !== "bounce") return answer;
-  if (!("did" in answer)) return answer.refused === true ? answer : { ...answer, refused: true };
+export function markRefused(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body) || body.refused === true) return body;
+  if (!("did" in body)) return { ...body, refused: true };
   const out = {};
-  for (const [k, v] of Object.entries(answer)) {
+  for (const [k, v] of Object.entries(body)) {
     if (k === "refused") continue;
     out[k] = v;
     if (k === "did") out.refused = true;
   }
   return out;
 }
+
+/** An apex answer is a refusal when it is a bounce; anything else passes through as the same object. */
+export const withRefused = (answer) => (answer?.error === "bounce" && !Array.isArray(answer) ? markRefused(answer) : answer);
 
 /**
  * THE SENDER, WHEN THE CALLER DID NOT NAME ONE (Deva's Commons: Pica and

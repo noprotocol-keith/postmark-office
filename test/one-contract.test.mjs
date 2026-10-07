@@ -550,3 +550,13 @@ test("POS-427 · withRefused marks a bounce once, beside did (else last), and le
   assert.equal(withRefused(ok), ok, "a success passes through as the same object");
   for (const other of [null, undefined, "text", [1], { error: "unavailable" }]) assert.equal(withRefused(other), other);
 });
+
+test("POS-427 B · markRefused marks any refusal body the doors send, whatever its error word; withRefused stays bounce-only", async () => {
+  const { markRefused, withRefused } = await import("../src/one-contract.mjs");
+  const rate = markRefused({ error: "rate", defect: "slow down", retry_after_s: 3 });
+  assert.deepEqual(Object.keys(rate), ["error", "defect", "retry_after_s", "refused"]);
+  const marked = markRefused({ error: "bounce", did: "say", defect: "d" });
+  assert.equal(markRefused(marked), marked, "a marked body is returned as it is");
+  assert.equal(withRefused({ error: "rate" }).refused, undefined, "the apex marks bounces only");
+  for (const other of [null, undefined, "text", [1]]) assert.equal(markRefused(other), other);
+});

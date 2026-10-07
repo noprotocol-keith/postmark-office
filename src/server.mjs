@@ -24,7 +24,7 @@ import { updateAddressBody, updateAddressFields, updateHome, updateHomeImage, up
 import { handleMcp, callTool, TOOLS as MCP_TOOLS, validateArgs, visitorBounces, VISITOR_BOUNCE } from "./mcp.mjs";
 // POS-70 box 1: every plain-API write route is judged by the act it performs,
 // against that act's own schema, in the apexes' own sentence (src/one-contract.mjs).
-import { judgeRoute, withRenamed, PATCH_PAPER_DOORS } from "./one-contract.mjs";
+import { judgeRoute, withRenamed, PATCH_PAPER_DOORS, markRefused } from "./one-contract.mjs";
 import { sendAtDoor } from "./send-at-door.mjs";
 import { TOWN_TOOL, townDispatchToolFor } from "./town-apex.mjs";
 import { householdApex, APEX_ONLY_FIELDS } from "./household-apex.mjs"; // the third door (2026-08-15)
@@ -611,8 +611,13 @@ const withBounceCode = (code, obj) =>
     && !Object.prototype.hasOwnProperty.call(obj, "code")
     ? (({ error, ...rest }) => ({ error, code, ...rest }))(obj)
     : obj;
+// EVERY REFUSAL SAYS SO (POS-427, Darko's option B), here for the same reason
+// the code is: every REST answer is written here. A status of 400 or more is a
+// refusal whatever verb answered it, so its body carries `refused: true`
+// (beside `did`, else last; one-contract.mjs § markRefused, never twice).
 const j = (res, code, obj) => {
   obj = withBounceCode(code, obj);
+  if (code >= 400) obj = markRefused(obj);
   const body = JSON.stringify(obj, null, 1);
   const headers = {
     "content-type": "application/json; charset=utf-8",

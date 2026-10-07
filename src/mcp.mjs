@@ -12,7 +12,7 @@ import { townSummary, residentList, residentPage, resident, mailList, letterAnsw
 import { townIndexReads, storeAnswer, repoLog as repoLogFromStore, regionList as regionListFromStore, bulletinList as bulletinListFromStore, bulletinTeaser as bulletinTeaserFromStore, bulletinEntry as bulletinEntryFromStore, home as homeFromStore, stampsRoster as stampsRosterFromStore, stampsDetail as stampsDetailFromStore, questIndexRows, questBoardOfRows } from "./town-index-store.mjs"; // POS-268: the readers moved to the store, behind TOWN_INDEX_READS=store
 import { DOC_NAMES, docsAnswer } from "./town-index.mjs"; // town { read: "docs" }: the docs value, shaped
 import * as townIndexStore from "./town-index-store.mjs"; // the moved readers by name, as the list above grows past a line
-import { READ_FIELDS } from "./one-contract.mjs"; // the one field list a read shares with its twin at another door (POS-70 row 39)
+import { READ_FIELDS, markRefused } from "./one-contract.mjs"; // the one field list a read shares with its twin at another door (POS-70 row 39); POS-427: every refusal says refused
 
 /** One line per doorstep segment, for `read_doorstep`'s description. Keyed by
  *  the segment name so the gloss is looked UP rather than typed in order — a
@@ -948,6 +948,17 @@ export function contentFor(result) {
 }
 
 function rpcResult(id, result) { return { jsonrpc: "2.0", id, result }; }
+// EVERY isError ANSWER THIS DOOR SENDS IS BUILT HERE (POS-427, Darko's option
+// B): the gates in front of the tools and the tripped catch below call this,
+// and callTool's own bounce is marked where it is sent. So a refusal at this
+// door carries `refused: true` whichever verb was called (one-contract.mjs §
+// markRefused, which never marks twice).
+function refusal(id, body, { compact = false } = {}) {
+  return rpcResult(id, {
+    content: [{ type: "text", text: compact ? JSON.stringify(markRefused(body)) : JSON.stringify(markRefused(body), null, 1) }],
+    isError: true,
+  });
+}
 function rpcError(id, code, message) { return { jsonrpc: "2.0", id, error: { code, message } }; }
 
 // Argument validation at the door lives in `validate-args.mjs` now, and is
@@ -996,33 +1007,24 @@ async function handleMessage(msg, ctx) {
       if ((name === "read_doorstep" || name === "list_mail") && args != null && typeof args === "object" && args.handle == null && ctx.key) {
         const handles = [...(ctx.key.handles ?? [])]; // a Set on live keys — normalize
         if (handles.length === 1) args.handle = handles[0];
-        else if (handles.length > 1) return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: "which resident?",
-            hint: `your key acts for ${handles.join(", ")} — pass handle` }, null, 1) }],
-          isError: true,
-        });
+        else if (handles.length > 1) return refusal(msg.id, { error: "bounce", defect: "which resident?",
+            hint: `your key acts for ${handles.join(", ")} — pass handle` });
       }
       // Writes need a signed-in door. Without one, bounce AND flag the request
       // so the HTTP layer answers 401 + WWW-Authenticate — the OAuth dance's
       // start signal. Reads fall through and serve anonymously.
       if (writeShaped(name, args) && !ctx.key) {
         ctx.authChallenge = true;
-        return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: "no key at the door",
-            hint: "writing needs a signed-in door — connectors sign in with GitHub; shell agents use a household key minted at the key desk (postmark.town/join)" }, null, 1) }],
-          isError: true,
-        });
+        return refusal(msg.id, { error: "bounce", defect: "no key at the door",
+            hint: "writing needs a signed-in door — connectors sign in with GitHub; shell agents use a household key minted at the key desk (postmark.town/join)" });
       }
       // whoami is a read, but it reads YOUR identity — so with no credential it
       // asks you to sign in (parity with GET /me's 401), not "you're nobody".
       // It is NOT a WRITE_TOOL, so a visitor gets their visitor identity back.
       if ((name === "whoami" || name === "world_my_marks") && !ctx.key) {
         ctx.authChallenge = true;
-        return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: "no key at the door",
-            hint: `${name} needs your own identity at this door — sign in with GitHub, or use a household key minted at the key desk (postmark.town/join)` }, null, 1) }],
-          isError: true,
-        });
+        return refusal(msg.id, { error: "bounce", defect: "no key at the door",
+            hint: `${name} needs your own identity at this door — sign in with GitHub, or use a household key minted at the key desk (postmark.town/join)` });
       }
       // THE STANDING GATE (the audit era, standing.mjs). A resident the
       // Registrar has quarantined or revoked keeps every read at this door and
@@ -1037,10 +1039,7 @@ async function handleMessage(msg, ctx) {
       // as. Reads never reach it: `writeShaped` is false for every one.
       if (writeShaped(name, args) && ctx.key) {
         const st = await standingBounce(ctx.key);
-        if (st) return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: st.defect, hint: st.hint }, null, 1) }],
-          isError: true,
-        });
+        if (st) return refusal(msg.id, { error: "bounce", defect: st.defect, hint: st.hint });
       }
       // The harbor write gate (Keemin-ruled 2026-08-16, harbor-gate.mjs): an
       // unsettled household reads everything and keeps only the ephemeral
@@ -1052,10 +1051,7 @@ async function handleMessage(msg, ctx) {
           : name === "town" ? (townDispatchToolFor(args?.do) ?? "town")
           : name;
         if (harborGated(ctx.key, gatedVerb)) {
-          return rpcResult(msg.id, {
-            content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: HARBOR_BOUNCE.defect, hint: HARBOR_BOUNCE.hint }, null, 1) }],
-            isError: true,
-          });
+          return refusal(msg.id, { error: "bounce", defect: HARBOR_BOUNCE.defect, hint: HARBOR_BOUNCE.hint });
         }
       }
       // Visitor scope: a signed-in account with no household reads the whole town
@@ -1069,31 +1065,22 @@ async function handleMessage(msg, ctx) {
       // visitor with a hint telling them to declare_household. The harbor gate
       // above resolves an apex act to its verb; this one now does the same.
       if (visitorBounces(name, args, ctx.key)) {
-        return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: VISITOR_BOUNCE.defect,
-            hint: VISITOR_BOUNCE.hint }, null, 1) }],
-          isError: true,
-        });
+        return refusal(msg.id, { error: "bounce", defect: VISITOR_BOUNCE.defect,
+            hint: VISITOR_BOUNCE.hint });
       }
       // Validate AFTER the auth gates: an unsigned call must still trigger the
       // 401 + WWW-Authenticate OAuth dance, even when its arguments are also bad.
       const bad = validateArgs(tool, args);
-      if (bad) return rpcResult(msg.id, {
-        content: [{ type: "text", text: JSON.stringify(bad, null, 1) }],
-        isError: true,
-      });
+      if (bad) return refusal(msg.id, bad);
       try {
         const result = await callTool(name, args, ctx);
         const isBounce = result && typeof result === "object" && result.error === "bounce";
         return rpcResult(msg.id, {
-          content: contentFor(result),
+          content: contentFor(isBounce ? markRefused(result) : result),
           isError: Boolean(isBounce),
         });
       } catch (e) {
-        return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: "the office tripped", hint: String(e?.message ?? e).slice(0, 200) }) }],
-          isError: true,
-        });
+        return refusal(msg.id, { error: "bounce", defect: "the office tripped", hint: String(e?.message ?? e).slice(0, 200) }, { compact: true });
       }
     }
     default:

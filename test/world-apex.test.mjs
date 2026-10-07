@@ -1603,6 +1603,43 @@ test("POS-427 · a refused act carries refused: true beside did, returned or thr
   });
 });
 
+test("POS-427 B · every refusal at both doors says refused, gates and flat verbs included; a success never does", async () => {
+  on();
+  await withOffice({ WORLD_APEX: "1" }, async () => {
+    // MCP: the validator's gate, in front of every tool.
+    const gate = await rpc("tools/call", { name: "world", arguments: { zz_probe: 1 } });
+    assert.equal(gate.body.result.isError, true);
+    const gated = JSON.parse(gate.body.result.content[0].text);
+    assert.equal(gated.refused, true, JSON.stringify(gated).slice(0, 200));
+    assert.equal(Object.keys(gated).at(-1), "refused");
+    // MCP: a flat verb's own bounce, composed by callTool, not by any apex.
+    const flat = await rpc("tools/call", { name: "read_resident", arguments: { handle: "nobody-at-all" } });
+    assert.equal(flat.body.result.isError, true);
+    assert.equal(JSON.parse(flat.body.result.content[0].text).refused, true);
+    // MCP: an apex refusal is marked once, beside did, not twice.
+    const said = await rpc("tools/call", { name: "world", arguments: { do: "say", args: { text: "x".repeat(501) } } });
+    const saidText = said.body.result.content[0].text;
+    assert.equal(saidText.match(/"refused"/g).length, 1, "marked once");
+    // MCP: a success carries nothing new.
+    const bare = await rpc("tools/call", { name: "world", arguments: {} });
+    assert.equal(bare.body.result.isError, false);
+    assert.equal("refused" in JSON.parse(bare.body.result.content[0].text), false);
+    // REST: the route's own gate (a body that is not JSON), and a success.
+    const res = await fetch(`${BASE}/world/apex`, {
+      method: "POST",
+      headers: { authorization: "Bearer apexkey", "content-type": "application/json" },
+      body: "this is not json",
+    });
+    assert.equal(res.status, 400);
+    const notJson = await res.json();
+    assert.deepEqual(Object.keys(notJson).slice(0, 2), ["error", "code"], "the pinned leading keys do not move");
+    assert.equal(Object.keys(notJson).at(-1), "refused");
+    const ok = await fetch(`${BASE}/world/apex?x=-900&y=-760`);
+    assert.equal(ok.status, 200);
+    assert.equal("refused" in await ok.json(), false);
+  });
+});
+
 test("POS-427 · a refusal with no did (a read, the door's own checks) says refused last; a success never does", async () => {
   on();
   const read = await worldApex({ read: "say", args: { text: "hi" } }, KEY_ALPHA);

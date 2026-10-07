@@ -656,6 +656,68 @@ labels "entered by hand, <date>". Its history is `history.jsonl` in the page's
 own directory, one line per week: the current week's line is rewritten each
 hour, so a week keeps its last reading. Deleting that file loses the history.
 
+### The ops gate (POS-395, 2026-10-07)
+
+The generated pages above (the hub and every dashboard, with their `data.json`
+twins and anything else in their directories) are operator telemetry, so they
+answer only to the operators. Each of their seven locations in
+`nginx-postmark-town.conf` includes `/etc/nginx/snippets/postmark-ops-gate.conf`.
+Three `/ops/` addresses stay open on purpose: `/ops/sentinel.json` (the status
+board every page reads), and the site-built `/ops/desk/` and `/ops/graph/`.
+
+Nothing on the box reads the generated pages over HTTP: the hub reads its
+siblings' twins from disk, and the generators write files. So the gate needs no
+credential on the box.
+
+**Two candidates; the operators pick one** and install it under the snippet's
+name:
+
+- **B, a password** (`nginx-ops-gate.basic.conf`). Self-contained on the box:
+  one line per operator in `/etc/nginx/postmark-ops.htpasswd`, asked for by the
+  browser or given to `curl -u`. No Cloudflare change.
+- **A, Cloudflare Access** (`nginx-ops-gate.access.conf`). The operators' own
+  sign-in at the edge and no shared password, as dev is gated. It needs an
+  Access application in the Cloudflare dashboard that covers the generated paths
+  and leaves the three open ones open. Access matches by path prefix and the hub
+  is `/ops/` itself, so the hub takes an application on `/ops/` plus Bypass
+  applications on `/ops/sentinel.json`, `/ops/desk/` and `/ops/graph/`.
+
+**Installing it** (on the box, the operators' hands):
+
+1. Read the live config first and backport anything it has that the repo copy
+   lacks: `sudo nginx -T | grep -n "location.*/ops\|add_header\|cf_edge"`. Any
+   `add_header` at the town server level is replaced inside the gated locations
+   by the snippet's own two; say so before going on.
+2. **B only:** write the password file, one operator at a time (each types their
+   own; `openssl passwd -6` asks twice and does not echo):
+
+   ```
+   sudo install -m 640 -o root -g www-data /dev/null /etc/nginx/postmark-ops.htpasswd
+   printf 'darko:%s\n' "$(openssl passwd -6)" | sudo tee -a /etc/nginx/postmark-ops.htpasswd >/dev/null
+   printf 'wright:%s\n' "$(openssl passwd -6)" | sudo tee -a /etc/nginx/postmark-ops.htpasswd >/dev/null
+   ```
+
+   **A only:** confirm `$cf_edge` is defined (`sudo nginx -T | grep -n cf_edge`)
+   and the Access applications are live.
+3. `sudo install -m 644 deploy/nginx-ops-gate.<basic|access>.conf /etc/nginx/snippets/postmark-ops-gate.conf`
+4. Install `nginx-postmark-town.conf` (or add its seven `include` lines to the
+   live file), then `sudo nginx -t && sudo systemctl reload nginx`.
+5. Check from off the box. Every generated address refuses (401 for B, 403 or
+   Access's redirect for A), and the three open ones answer 200:
+
+   ```
+   for p in "" traffic/ git/ economy/ world/ activity/ awareness/ traffic/data.json; do
+     curl -s -o /dev/null -w "%{http_code} /ops/$p\n" "https://postmark.town/ops/$p"; done
+   for p in sentinel.json graph/ desk/; do
+     curl -s -o /dev/null -w "%{http_code} /ops/$p\n" "https://postmark.town/ops/$p"; done
+   curl -s -o /dev/null -w "%{http_code}\n" -u darko https://postmark.town/ops/traffic/   # B: 200
+   ```
+
+**Undoing it:** empty the snippet (`sudo truncate -s 0
+/etc/nginx/snippets/postmark-ops-gate.conf`), then `nginx -t` and reload. Do not
+remove the file or the `include` lines: without the file, `nginx -t` refuses the
+whole config.
+
 ## Branch previews (`/preview/<slug>/`, 2026-07-20)
 
 Branch builds of the town site, served noindexed at

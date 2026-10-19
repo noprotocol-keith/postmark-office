@@ -4354,14 +4354,16 @@ async function placementForecast({ worldClone, w, worldUnread, id, ring, mistsCr
 }
 
 /**
- * THE WORDS FOR A PLACED CANDY (POS-692; drafted for Darko, who reads them
- * before merge). Said only when the door's candy rule refuses (§ leaveMarkAct):
- * the way candy IS made, with the resident's own handle in it. A set-down by
- * kind is not built yet (world-kinds.mjs § drop), so it is not offered.
+ * THE WORDS FOR A PLACED CANDY (POS-692; re-drafted around kinds for Darko,
+ * 2026-10-19 09:21, who reads them before merge). Said only when the door's
+ * candy rule refuses (§ leaveMarkAct): candy is made by its KIND, each a town
+ * subclass of candy that residents asked for, with the resident's own handle
+ * in the call that works. A set-down by kind is not built (world-kinds.mjs §
+ * drop), so it is not offered. A new kind is asked for by letter to wright.
  */
 export const CANDY_IS_MADE = Object.freeze({
-  defect: "candy is made into hands or a holder, not placed",
-  hint: (by) => `a candy is one of a kind, made by the count: leave-mark { kind: "candy", count: 5, to: "${by}" } makes five into your hands, and to: a holder's id (a bowl made with holder: true) fills that instead. Then give { kind: "candy", count: 1, to: <a resident or a holder> } hands one on, and consume { kind: "candy" } eats one. A candy has no name or story of its own yet: to leave a sweet with its own story, leave a thing (kind: "thing") and tell it in the body. Nothing was written.`,
+  defect: "candy is made by its kind, into hands or a bowl, not placed as a mark",
+  hint: (by) => `every kind of candy is the town's, and anyone may make it: explain: "candy" lists the kinds. leave-mark { kind: "<a kind>", count: 5, to: "${by}" } makes five into your hands, and to: a bowl's id (a thing made with holder: true) fills the bowl instead. give { kind: "<the kind>", count: 1, to: <a resident or a bowl> } hands one on, and consume { kind: "<the kind>" } eats one. Your own candy not a kind yet? Write to wright with its name and a line about it, and the town makes it a kind. Nothing was written.`,
 });
 
 // POS-637 PR-B: the act, perceived by any creature whose ring holds it (act-watch.mjs § perceived).
@@ -4376,7 +4378,14 @@ async function leaveMarkAct(worldClone, payload = {}, key = null, { setDown = nu
   // its own, applies to a count.
   if (payload.to !== undefined) {
     const handles = [...(key?.handles ?? [])];
-    const actor = payload.by ?? (handles.length === 1 ? handles[0] : undefined);
+    // WHO MAKES IT is the top-level handle, the standpoint the world card keeps
+    // top-level (kogane's bug post, POS-692 ruling 09:21): it wins over a key's
+    // count, and a `by` naming another resident is two actors, refused.
+    const named = payload.handle != null && String(payload.handle).trim() !== "" ? String(payload.handle).trim() : null;
+    if (named && payload.by != null && String(payload.by).trim() !== named)
+      throw bounce(422, `two residents named: handle "${named}" and by "${payload.by}"`,
+        `a make is one resident's act: the top-level handle is who makes it. Leave by: off, or name the same resident. Nothing was made.`);
+    const actor = named ?? payload.by ?? (handles.length === 1 ? handles[0] : undefined);
     if (!actor) throw bounce(422, "which resident is making these?", handles.length ? `pass by: one of ${handles.join(", ")}` : "this key acts for no resident");
     if (!key?.handles?.has(actor)) throw bounce(403, `"${actor}" is not one of your residents`, `this key acts for: ${handles.join(", ") || "(none)"}`);
     const own = ["slug", "body", "at", "extent", "points", "slot", "value", "parent_id", "class", "consent", "placed_by", "preview", "amend"].filter((k) => payload[k] !== undefined);

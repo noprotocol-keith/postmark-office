@@ -285,6 +285,10 @@ test("a candy refused for its set-down reads a word, never the blank cause (POS-
   assert.equal(r.cause, "malformed");
   assert.match(r.says, /refused at candle 174 — malformed/);
   assert.doesNotMatch(r.says, /no word in the bulletin's five/);
+  // and the way that works rides beside the word: candy is made by its kind (Darko 2026-10-19)
+  assert.match(r.next, /made by its kind/);
+  assert.ok(r.says.endsWith(`: ${r.next}`), r.says);
+  assert.equal(causeOf("collision").next, undefined, "a check with no next step carries none");
 });
 
 test("EVERY refusal string the town can write gets the word this map decided for it", () => {

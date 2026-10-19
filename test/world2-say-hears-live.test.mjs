@@ -8,7 +8,7 @@
 //
 //   FALSIFIER  a live say at T is heard through /world2/say at T+1 min, at its
 //              own place, and not by a point beyond the earshot
-//   ERAS       a crystallized emission is still heard by its own stamped TTL
+//   ERAS       a crystallized emission is still heard by its own stamps
 //              and radius, beside the live say
 //   UNPLACED   a live say whose anchor the store does not hold is left out and
 //              counted, never placed at {0,0}
@@ -82,8 +82,11 @@ test("ERAS: the crystallized emission is heard by its own stamps, beside the liv
   ];
   const r = await sayAt(acts, T + 60_000, { x: 1390, y: 5665 });
   assert.deepEqual(r.body.heard.map((h) => h.props.text).sort(), ["from the crossing-save", "hello from the quay"]);
+  // How long each is heard is the hearing rule's (the row's TTL here; office#633's
+  // settlement window on the train), held in world2-live-reads.test.mjs and
+  // world2-say-hearing.test.mjs. What this holds is that the live say rides it too.
   const later = await sayAt(acts, T + 4 * 60_000, { x: 1390, y: 5665 });
-  assert.deepEqual(later.body.heard.map((h) => h.props.text), ["hello from the quay"], "the emission's own five minutes have run out");
+  assert.ok(later.body.heard.some((h) => h.props.text === "hello from the quay"), "the live say is still heard four minutes on");
 });
 
 test("UNPLACED: a live say whose anchor the store does not hold is left out, counted, never placed at {0,0}", async () => {

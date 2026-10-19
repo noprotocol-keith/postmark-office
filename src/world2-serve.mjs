@@ -1144,9 +1144,24 @@ export async function world2Serve(path, searchParams, { p: injected = null } = {
       return { code: 422, body: { error: "bounce", defect: "mode=current needs a radius",
         hint: "the current-dial reading takes ONE radius for the whole answer — pass ?radius=<m>. The default (mode=per-act) reads each emission's own stamped radius_m instead." } };
     }
-    const { rows } = await p.query(
-      "SELECT id, at, actor, action, payload FROM acts WHERE action IN ('legacy:emission','emission') ORDER BY at, id");
+    // THE LIVE SAYS TOO (POS-694). The crystallized emissions stop at the last
+    // crossing-save that wrote one (2026-08-27); every say since is a live `say`
+    // act. Both eras are read, as /world2/conversations reads them, with the
+    // marks for the live says' anchors and the say class's dials for the radius
+    // and hearing time a live say does not stamp (conversations.mjs §
+    // sayActsAsEmissions).
+    const [{ rows: voiceRows }, { rows: markRows }] = await Promise.all([
+      p.query(`SELECT id, at, actor, action, at_anchor, at_dx, at_dy, payload FROM acts
+                WHERE action = ANY($1) ${talk.VOICE_ORDER_SQL}`, [talk.VOICE_ACTIONS]),
+      p.query(talk.ANCHOR_MARKS_SQL),
+    ]);
+    const centres = talk.anchorCentres(markRows);
+    const dials = talk.sayDials(markRows.filter((m) => m.status === "standing"));
+    const air = talk.sayActsAsEmissions(voiceRows, { centreOf: (id) => centres.get(id) ?? null,
+      earshotM: dials.earshot_m.value, fadeMs: dials.fade_min.ms });
+    const rows = air.rows;
     const emissions = live.presentEmissionsAt(rows, at.ms);
+    const fellBack = talk.sayDialsDisclosure(dials);
     const body = {
       what: "the emissions still hanging in the air at this instant — presence is a query over born_at/ttl, never a delete",
       evaluated_at: new Date(at.ms).toISOString(),
@@ -1155,7 +1170,10 @@ export async function world2Serve(path, searchParams, { p: injected = null } = {
         ? `one radius for the whole answer (${radiusM} m), the way voices.mjs's live ear reads it`
         : "each emission's OWN stamped radius_m — the law that instance was born under (a dial changed tomorrow does not re-govern what happened today)",
       earshot_rule_is_unruled: "these two readings differ once the sound class's radius_m moves, and it has (class_version 1 -> 2 across the record). Pass ?mode=current&radius=<m> for the other one.",
-      disclosed: [live.DISCLOSURES.live_sound, live.DISCLOSURES.frames],
+      live_says: air.live,
+      ...(air.unplaced.length ? { unplaced_says: { count: air.unplaced.length,
+        example: { act_id: air.unplaced[0].act_id, anchor: air.unplaced[0].anchor } } } : {}),
+      disclosed: [live.DISCLOSURES.live_sound, live.DISCLOSURES.frames, ...(fellBack ? [fellBack] : [])],
     };
     if (!near) return { code: 200, body: { ...body, emissions } };
     return { code: 200, body: { ...body,

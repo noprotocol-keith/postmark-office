@@ -30,27 +30,35 @@ after(() => {
   if (env.url == null) delete process.env.WORLD2_PG_URL; else process.env.WORLD2_PG_URL = env.url;
 });
 
-const { world2Serve } = await import("../src/world2-serve.mjs");
+const { world2Serve, SAY_READ_SQL, SAY_LOOKBACK_MS } = await import("../src/world2-serve.mjs");
+const { currentCrossing } = await import("../src/crossings.mjs");
 
 const MARKS = [{ slug: "the-town/the-quay", status: "standing", geometry: { at: { x: 1390, y: 5665 }, extent: { w: 20, h: 20 } }, data: {} }];
 const T = Date.parse("2026-10-19T12:00:00Z");
 const iso = (ms) => new Date(ms).toISOString();
 
 const liveSay = (id, actor, anchor, atMs, text, dx = 0, dy = 0) => ({
-  id, at: new Date(atMs), actor, action: "say", at_anchor: anchor, at_dx: dx, at_dy: dy, payload: { text, place: null },
+  id, at: new Date(atMs), crossing: currentCrossing(atMs), actor, action: "say", at_anchor: anchor, at_dx: dx, at_dy: dy, payload: { text, place: null },
 });
 // The crossing-save's crystallized row, as live-reads.mjs § emissionOf reads it.
 const emission = (id, actor, atMs, { x, y, ttlMin = 5, radiusM = 60, text }) => ({
-  id, at: new Date(atMs), actor, action: "legacy:emission",
+  id, at: new Date(atMs), crossing: currentCrossing(atMs), actor, action: "legacy:emission",
   payload: { at: iso(atMs), payload: { class: "sound", x, y, text, spoken_by: actor, radius_m: radiusM, ttl_min: ttlMin,
     ttl_expires_at: iso(atMs + ttlMin * 60_000) } },
 });
 
+// The acts read answers as Postgres would: only SAY_READ_SQL's bounds ($2 crossing, $3 instant) are honoured,
+// and an unbounded read (any other acts SQL) answers every voice act, so an unbounded door is seen. `asked`
+// keeps what the door sent and what came back.
+let asked = [];
 const poolOf = (acts) => ({
   query: async (sql, params) => {
     if (/FROM acts/i.test(sql)) {
       const actions = params?.[0] ?? null;
-      return { rows: actions ? acts.filter((a) => actions.includes(a.action)) : acts };
+      let rows = actions ? acts.filter((a) => actions.includes(a.action)) : acts;
+      if (sql === SAY_READ_SQL) rows = rows.filter((a) => a.crossing >= params[1] && a.at.getTime() >= Date.parse(params[2]));
+      asked.push({ sql, params, ids: rows.map((r) => r.id) });
+      return { rows };
     }
     if (/FROM marks/i.test(sql)) return { rows: MARKS };
     return { rows: [] };
@@ -97,4 +105,21 @@ test("UNPLACED: a live say whose anchor the store does not hold is left out, cou
   assert.deepEqual(r.body.heard, []);
   assert.equal(r.body.unplaced_says.count, 1);
   assert.equal(r.body.unplaced_says.example.act_id, "20002");
+});
+
+test("BOUNDED: a say from two days ago is never read; the read is bounded in SQL at 13 hours", async () => {
+  asked = [];
+  const acts = [
+    liveSay(19001, "kogane", "the-town/the-quay", T - 2 * 24 * 3600_000, "two days ago at the quay"),
+    liveSay(20001, "wright", "the-town/the-quay", T, "hello from the quay"),
+  ];
+  const r = await sayAt(acts, T + 60_000, { x: 1390, y: 5665 });
+  assert.equal(r.code, 200);
+  const read = asked.find((a) => /FROM acts/i.test(a.sql));
+  assert.equal(read.sql, SAY_READ_SQL, "the door reads voices through the one bounded statement");
+  assert.equal(SAY_LOOKBACK_MS, 13 * 3600_000, "twelve hours to the next settlement, plus slack");
+  assert.equal(read.params[2], iso(T + 60_000 - SAY_LOOKBACK_MS), "the instant's lower bound is the asked instant less 13 h");
+  assert.equal(read.params[1], currentCrossing(T + 60_000 - SAY_LOOKBACK_MS) - 1, "the index range starts a crossing before the lookback's");
+  assert.deepEqual(read.ids, [20001], "the two-day-old say was never read");
+  assert.deepEqual(r.body.heard.map((h) => h.act_id), ["20001"]);
 });

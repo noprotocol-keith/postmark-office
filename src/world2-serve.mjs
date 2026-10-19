@@ -645,6 +645,17 @@ export function receiptTreeOnly(receipt) {
 }
 
 /**
+ * THE SAY READ'S BOUND (POS-694, Wright's review of #647). Hearing lasts at
+ * most until the next settlement (12 h, POS-226), so /world2/say reads the
+ * voice acts of the last 13 hours before the instant asked: 12 h plus slack.
+ * $1 the voice actions, $2 the lookback's crossing less one (the index range,
+ * `acts_crossing_idx`), $3 the lookback instant (the exact cut).
+ */
+export const SAY_LOOKBACK_MS = 13 * 3600 * 1000;
+export const SAY_READ_SQL = `SELECT id, at, actor, action, at_anchor, at_dx, at_dy, payload FROM acts
+                WHERE crossing >= $2 AND action = ANY($1) AND at >= $3::timestamptz ${talk.VOICE_ORDER_SQL}`;
+
+/**
  * Route a GET under /world2/*. Returns null when the path is not ours
  * (server.mjs falls through), else { code, body }.
  *
@@ -1150,9 +1161,18 @@ export async function world2Serve(path, searchParams, { p: injected = null } = {
     // marks for the live says' anchors and the say class's dials for the radius
     // and hearing time a live say does not stamp (conversations.mjs §
     // sayActsAsEmissions).
+    //
+    // BOUNDED IN SQL, NEVER EVERY VOICE EVER (Wright's review of #647): hearing
+    // lasts at most until the next settlement, twelve hours, so only what was
+    // said in SAY_LOOKBACK_MS before the instant asked is read.
+    // `acts_crossing_idx` serves it: a voice act's `crossing` is the crossing it
+    // was written in (crossings.mjs § currentCrossing, monotone in time), so
+    // `crossing >= ` the lookback's crossing, less one for a writer's clock, is
+    // an index range that holds every act at or after the lookback, and
+    // `at >= ` is then the exact cut.
+    const readFrom = at.ms - SAY_LOOKBACK_MS;
     const [{ rows: voiceRows }, { rows: markRows }] = await Promise.all([
-      p.query(`SELECT id, at, actor, action, at_anchor, at_dx, at_dy, payload FROM acts
-                WHERE action = ANY($1) ${talk.VOICE_ORDER_SQL}`, [talk.VOICE_ACTIONS]),
+      p.query(SAY_READ_SQL, [talk.VOICE_ACTIONS, currentCrossing(readFrom) - 1, new Date(readFrom).toISOString()]),
       p.query(talk.ANCHOR_MARKS_SQL),
     ]);
     const centres = talk.anchorCentres(markRows);

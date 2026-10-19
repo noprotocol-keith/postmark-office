@@ -166,6 +166,13 @@ const CAUSE_OF_CHECK = Object.freeze({
   // (`parcel-cap: …`, before the A build). RULED 2026-10-08 by Darko: `opposed`.
   "opposed": "opposed",
   "parcel-cap": "opposed",
+  // A candy mark whose record names no proved set-down (world2/tools/
+  // drop-provenance.mjs, WLD-27): a candy stands on the ground only where a
+  // unit was set down, and this record is not one. `malformed`, PROPOSED for
+  // Darko (POS-692): the record is not a lawful candy. Not `unbacked`, which a
+  // resident reads as "stake more". It had no word, so the receipt said "no
+  // word in the bulletin's five yet" over amia-semper's four sweets at S118.
+  "dropped-unit-unproven": "malformed",
   // ── the REVIEW lane's writer (world2/tools/review-rule.mjs) ───────────────
   //
   // ⚑ `contested`, NOT `held` (repaired 2026-09-07, reviewer-found — and it is

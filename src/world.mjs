@@ -4353,6 +4353,17 @@ async function placementForecast({ worldClone, w, worldUnread, id, ring, mistsCr
   return { as_of: f.as_of, fringe: r.fringe, wall: r.wall, says: r.says };
 }
 
+/**
+ * THE WORDS FOR A PLACED CANDY (POS-692; drafted for Darko, who reads them
+ * before merge). Said only when the door's candy rule refuses (§ leaveMarkAct):
+ * the way candy IS made, with the resident's own handle in it. A set-down by
+ * kind is not built yet (world-kinds.mjs § drop), so it is not offered.
+ */
+export const CANDY_IS_MADE = Object.freeze({
+  defect: "candy is made into hands or a holder, not placed",
+  hint: (by) => `a candy is one of a kind, made by the count: leave-mark { kind: "candy", count: 5, to: "${by}" } makes five into your hands, and to: a holder's id (a bowl made with holder: true) fills that instead. Then give { kind: "candy", count: 1, to: <a resident or a holder> } hands one on, and consume { kind: "candy" } eats one. A candy has no name or story of its own yet: to leave a sweet with its own story, leave a thing (kind: "thing") and tell it in the body. Nothing was written.`,
+});
+
 // POS-637 PR-B: the act, perceived by any creature whose ring holds it (act-watch.mjs § perceived).
 export async function leaveMarkViaOffice(worldClone, payload = {}, key = null, opts = {}) { return perceived(() => leaveMarkAct(worldClone, payload, key, opts)); }
 async function leaveMarkAct(worldClone, payload = {}, key = null, { setDown = null, mistsCrossing = null, dropUnit = null } = {}) {
@@ -4549,6 +4560,33 @@ async function leaveMarkAct(worldClone, payload = {}, key = null, { setDown = nu
         makers.read
           ? `its makers is false (set on ${makers.from}): a resident may make an instance unless it would give them control over something that mints or confers standing (the-town/nothing-you-control-mints), so this class is the town's to make — world { explain: "${klass}" } says who makes what`
           : `no class in "${klass}"'s lineage states makers, and an unread makers answers false, the root's own answer (postmark-node), so making one is the town's act, not a resident's — world { explain: "${klass}" } says who makes what`);
+    // ── A CANDY ON THE GROUND IS A SET-DOWN UNIT'S, PROVED (POS-692) ──────────
+    // makers lets a resident MAKE candy, and candy is made by the count into
+    // hands or a holder (`to:`, above). A candy mark of its own stands only
+    // where a unit was set down: the clearing refuses every candy claim whose
+    // record does not name its proved `units:drop` act (drop-provenance.mjs,
+    // WLD-27). Taken here, amia-semper's four named sweets stood as drafts and
+    // were refused at S118 with no word. So the door asks the clearing's own
+    // rule, both halves, and refuses at once. The hold door's own set-down is
+    // proved by construction (`droppedUnit`: it hands in the act it just wrote).
+    if (!droppedUnit) {
+      const { isCandyClass, dropRefId, dropProvenanceCheck, dropRefusalOf } = await import("../world2/tools/drop-provenance.mjs");
+      if (isCandyClass(klass, (name) => lineageOf(name, classExtendsOf()))) {
+        const claim = { claimant: by, class: String(klass), data: { label: payload.label, dropped: payload.dropped } };
+        let check;
+        if (dropRefId(payload.dropped) == null) check = dropProvenanceCheck(claim, null);
+        else {
+          try {
+            const { officeRead } = await import("./world2-pen.mjs");
+            check = await officeRead((c) => dropRefusalOf((sql, params) => c.query(sql, params), claim), { by: "candy-door" });
+          } catch (e) {
+            throw bounce(503, "the set-down this candy names could not be checked",
+              faultLogged("the candy door could not read the set-down it names", e));
+          }
+        }
+        if (check) throw bounce(422, CANDY_IS_MADE.defect, CANDY_IS_MADE.hint(by));
+      }
+    }
   }
 
   // ── the thing grammar (the object primitive) ────────────────────────────────
@@ -4666,7 +4704,9 @@ async function leaveMarkAct(worldClone, payload = {}, key = null, { setDown = nu
     : klass === "bounty"
       ? { class: klass, ask: String(ask).trim(), reward: Number(reward), status: status === undefined ? "open" : String(status).trim() }
       : klass === "chest" ? { class: klass, ...chestFields }
-        : klass === "candy" ? { class: klass, label: String(payload.label), dropped: String(payload.dropped) }
+        // only a proved candy reaches here (§ A CANDY ON THE GROUND), and each field is written only when
+        // sent: String(undefined) once wrote the text "undefined" into four claims and their acts (POS-692)
+        : klass === "candy" ? { class: klass, ...(payload.label != null ? { label: String(payload.label) } : {}), ...(payload.dropped != null ? { dropped: String(payload.dropped) } : {}) }
           : { class: klass, ...(holderFields ?? {}) };
   // ── THE FORM IT IS WRITTEN IN (LOGOS v2 part 2; O1's body, G3: "The office's
   // own writers stay on the old form here and flip in O2") ─────────────────────

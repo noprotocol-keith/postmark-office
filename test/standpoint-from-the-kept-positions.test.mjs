@@ -226,3 +226,18 @@ test("FRESH: a walk written outside the walk door is the standpoint within one s
     world.positionProjection.invalidate();
   }
 });
+
+// The two writers in this process record in the same step, each with its act id,
+// so the head read knows them heard (POS-691): the walk door, and the enter
+// door's set-down, the issue's prod writer. Read from the source, as WIRED
+// reads the walk door (walk-from-the-kept-positions.test.mjs).
+test("WIRED (POS-691): the walk door and the enter door's set-down record in-step with their act ids", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const src = (f) => readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), "utf8");
+  const bodyOf = (text, head) => { const i = text.indexOf(head); assert.ok(i > 0, `${head} is gone`); const j = text.indexOf("\n}\n", i); return text.slice(i, j); };
+  const land = bodyOf(src("world-apex.mjs"), "async function landOnEnter(");
+  assert.ok(land.indexOf("recordMoved(") > land.indexOf("appendJournal("), "landOnEnter writes its set-down and does not record it");
+  assert.match(land, /recordMoved\([\s\S]*?row\?\.actId/, "landOnEnter records without the act id");
+  assert.match(src("world.mjs"), /recordMoved\(movement, walkRow\?\.actId/, "the walk door records without the act id");
+});

@@ -361,6 +361,12 @@ test("an unreadable since/until is a 422, never an empty roll marked complete or
   assert.equal(await total("2026-07-03T08:30:00+02:00"), await total("2026-07-03T06:30:00.000Z"), "an offset is converted to UTC");
   assert.equal(await total("2026-07-03T06:30:00+00:00"), await total("2026-07-03T06:30:00Z"), "+00:00 reads as Z");
   assert.equal(await total("2026-07-03T06:30"), await total("2026-07-03T06:30:00Z"), "a zoneless time reads as UTC");
+  // the raw form: curl ...?since=2026-07-03T08:30:00+02:00 unencoded, where the query string decodes `+` to a space
+  const rawTotal = async (v) => (await (await get("/letters?limit=1&since=" + v)).json()).total;
+  assert.equal(await rawTotal("2026-07-03T08:30:00+02:00"), await total("2026-07-03T06:30:00.000Z"), "a raw + offset is read as +");
+  assert.equal(await rawTotal("2026-07-03T06:30:00+00:00"), await total("2026-07-03T06:30:00Z"), "a raw +00:00 reads as Z");
+  assert.equal((await get("/letters?since=yesterday%2000:00")).status, 422, "a space that is not before an offset is still refused");
+  assert.equal((await get("/letters?since=2026-07-03%2008:30")).status, 422, "a date and a space is not a timestamp");
   for (const ok of ["2026-07-03", "2026-07-03T08:30:00.000Z", "2026-07-03T08:30Z", "2026-07-03T08:30:00+00:00", "2026-07-03T08:30", "2026-07-03T08:30:00+02:00"]) {    assert.equal((await get("/letters?since=" + encodeURIComponent(ok))).status, 200, ok);
   }
   assert.equal((await get("/letters")).status, 200);

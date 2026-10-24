@@ -41,6 +41,14 @@ test("a readable timestamp is handed down as its UTC moment; a bare date is left
   }
 });
 
+test("over HTTP a single space before an HH:MM offset is the `+` a query string decoded; MCP does not read it so", () => {
+  const http = { since: "2026-07-03T08:30:00 02:00" };
+  assert.equal(dateFilterDefect(http), null);
+  assert.equal(http.since, "2026-07-03T06:30:00.000Z");
+  assert.equal(dateFilterDefect({ since: "2026-07-03T08:30:00 02:00" }, undefined, "mcp").field, "since");
+  assert.equal(dateFilterDefect({ since: "2026-07-03 08:30" }).field, "since");
+});
+
 test("the defect says UTC and the hint is the door's own spelling", () => {
   const mcp = dateFilterDefect({ since: "yesterday" }, undefined, "mcp");
   assert.equal(mcp.code, 422);

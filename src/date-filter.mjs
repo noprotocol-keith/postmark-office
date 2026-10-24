@@ -45,7 +45,10 @@ export function dateFilterDefect(opts, names = ["since", "until"], door = "http"
   for (const name of names) {
     const v = opts?.[name];
     if (v === undefined || v === null || v === "") continue;
-    const r = readFilter(v);
+    // Over HTTP the value came from a query string, where a raw `+` decodes to a space: `...T12:00:00+00:00`
+    // sent unencoded arrives as `...T12:00:00 00:00`. One space directly before an HH:MM offset at the end of a
+    // timestamp is that `+` (curl without -G --data-urlencode), so it is read as one.
+    const r = readFilter(door === "http" ? String(v).replace(/^(\d{4}-\d{2}-\d{2}T[\d:.]+) (\d{2}:\d{2})$/, "$1+$2") : v);
     if (!r)
       return {
         code: 422, field: name,

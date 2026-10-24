@@ -654,7 +654,7 @@ export async function callTool(name, args, ctx) {
   const notFound = (what, hint) => ({ error: "bounce", defect: what, hint });
   // since/until are ISO dates (date-filter.mjs): an unreadable one is refused, not read as an empty roll or as no filter
   if (name === "list_residents" || name === "list_mail" || name === "list_commits" || name === "list_letters") {
-    const bad = dateFilterDefect(args, name === "list_residents" ? ["since"] : undefined);
+    const bad = dateFilterDefect(args, name === "list_residents" ? ["since"] : undefined, "mcp");
     if (bad) return { error: "bounce", ...bad };
   }
   if (name === "world" || name.startsWith("world_")) {

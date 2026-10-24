@@ -347,19 +347,44 @@ test("GET /letters filters: resident, since/until, region, exclude-office, combi
 test("an unreadable since/until is a 422, never an empty roll marked complete or a filter that was ignored", async () => {
   // `since=yesterday` sorts after every digit (0 rows, complete: true);
   // `since=10/01/2026` sorts before every digit (the filter vanishes).
-  for (const bad of ["yesterday", "10/01/2026", "2026-13-45", "2026-02-30", "2026-10-1", "2026-07-03T25:00:00Z"]) {
+  for (const bad of ["yesterday", "10/01/2026", "2026-13-45", "2026-02-30", "2026-10-1", "2026-07-03T25:00:00Z", "2026-07-03T08:30:00+02:00", "2026-07-03T08:30"]) {
     for (const door of ["/letters?since=", "/letters?until=", "/mail/wright?since=", "/repo/log?until=", "/residents?since="]) {
       const r = await get(door + encodeURIComponent(bad));
       assert.equal(r.status, 422, `${door}${bad}`);
       const b = await r.json();
       assert.match(b.defect, /ISO date/, `${door}${bad}`);
+      assert.match(b.hint, /^send \?(since|until)=2026-10-01$/, "the hint says what to send over HTTP");
     }
   }
-  // what was readable stays readable: a date, and a full timestamp
-  for (const ok of ["2026-07-03", "2026-07-03T08:30:00.000Z", "2026-07-03T08:30:00+02:00", "2026-07-03T08:30"]) {
+  // what was readable stays readable: a date, and a UTC timestamp. An offset or a zoneless time is refused above, because the filter compares strings and would read it as UTC without saying so.
+  assert.match((await (await get("/letters?since=" + encodeURIComponent("2026-07-03T08:30:00+02:00"))).json()).defect, /UTC timestamp ending in Z/);
+  for (const ok of ["2026-07-03", "2026-07-03T08:30:00.000Z", "2026-07-03T08:30Z"]) {
     assert.equal((await get("/letters?since=" + encodeURIComponent(ok))).status, 200, ok);
   }
   assert.equal((await get("/letters")).status, 200);
+});
+
+test("MCP: an unreadable since/until is a 422 bounce naming the field, on every list verb (the apex is in date-filter.test.mjs)", async () => {
+  const bounced = async (name, args) => {
+    const { body } = await rpc("tools/call", { name, arguments: args });
+    assert.equal(body.result.isError, true, `${name} ${JSON.stringify(args)}`);
+    return JSON.parse(body.result.content[0].text);
+  };
+  for (const [name, args, field] of [
+    ["list_letters", { since: "yesterday" }, "since"],
+    ["list_letters", { until: "10/01/2026" }, "until"],
+    ["list_mail", { handle: "wright", since: "yesterday" }, "since"],
+    ["list_commits", { until: "2026-02-30" }, "until"],
+    ["list_residents", { since: "yesterday" }, "since"],
+  ]) {
+    const b = await bounced(name, args);
+    assert.equal(b.code, 422, `${name}`);
+    assert.equal(b.field, field, `${name} names the field`);
+    assert.match(b.defect, new RegExp(`^${field} must be an ISO date`), `${name}`);
+    assert.equal(b.hint, `send ${field}: "2026-10-01"`, "the hint says what to send over MCP");
+  }
+  const ok = await rpc("tools/call", { name: "list_letters", arguments: { since: "2026-07-03" } });
+  assert.notEqual(ok.body.result.isError, true);
 });
 
 test("GET /residents?office= takes true or false and refuses the rest, instead of reading 1/yes as false", async () => {

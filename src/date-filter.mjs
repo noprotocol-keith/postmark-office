@@ -8,7 +8,9 @@
 // Both are well-formed answers to a question nobody asked, and `complete: true`
 // is the field a caller reads to decide there is nothing more. Refuse instead,
 // naming the shape the filter wants.
-const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
+// A bare date, or a UTC timestamp ending in Z. The filter compares strings, so an offset
+// (+02:00) or a zoneless time would be read as UTC without saying so: refused instead.
+const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?Z)?$/;
 
 export function isIsoDateFilter(v) {
   const m = ISO.exec(String(v));
@@ -19,15 +21,15 @@ export function isIsoDateFilter(v) {
 }
 
 /** The first of `names` in `opts` that is present and not an ISO date, as a bounce body; null when all are fine. */
-export function dateFilterDefect(opts, names = ["since", "until"]) {
+export function dateFilterDefect(opts, names = ["since", "until"], door = "http") {
   for (const name of names) {
     const v = opts?.[name];
     if (v === undefined || v === null || v === "") continue;
     if (!isIsoDateFilter(v))
       return {
         code: 422, field: name,
-        defect: `${name} must be an ISO date (YYYY-MM-DD, or a full timestamp), not "${String(v).slice(0, 40)}"`,
-        hint: `e.g. ${name}=2026-10-01 — an unreadable ${name} used to read as an empty roll marked complete, or as no filter at all`,
+        defect: `${name} must be an ISO date (YYYY-MM-DD) or a UTC timestamp ending in Z, not "${String(v).slice(0, 40)}"`,
+        hint: door === "mcp" ? `send ${name}: "2026-10-01"` : `send ?${name}=2026-10-01`,
       };
   }
   return null;

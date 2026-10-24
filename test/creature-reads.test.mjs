@@ -207,3 +207,51 @@ test("the bare read's creature cards carry the class mark's blurb, the class it 
   // without the law in hand the entry is what it was: never an invented blurb
   assert.equal(creatureEntries(pairs)[0].blurb, undefined);
 });
+
+test("inside the 10 s answer window the read says so, with the seconds left, as the act's 429 does", async () => {
+  const { worldApex, dispatchCreatureVerb } = await apex();
+  const living = THREE();
+  living.fold([{ id: "77", at: iso(NOW - 4000), actor: RAVEN, action: "react", object: "70", payload: { to: "kai", verb: "walk", reaction: "watch", roll: 3 } }]);
+  const { deps } = seams({ living, here: { x: 1010, y: 0 } });
+  const r = await worldApex({ read: "watch" }, KEY, { creatureDeps: deps });
+  assert.equal(r.error, undefined);
+  assert.equal(r.creatures[0].can, false);
+  assert.equal(r.creatures[0].why_not, "still answering you");
+  assert.equal(r.creatures[0].retry_after_s, 6);
+  const act = seams({ living, here: { x: 1010, y: 0 } });
+  const done = await dispatchCreatureVerb("watch", { do: "watch", args: { creature: RAVEN } }, KEY, { door: (a, k) => worldCreature(a, k, act.deps) });
+  assert.equal(done.code, 429, "the act agrees");
+});
+
+test("a world freeze: every row says can:false with the freeze's words, as the act bounces", async () => {
+  const { worldApex } = await apex();
+  const { deps } = seams({ here: { x: 1010, y: 0 } });
+  const r = await worldApex({ read: "watch" }, KEY, { creatureDeps: { ...deps, freeze: () => ({ error: "bounce", code: 503, defect: "the world is frozen for the settlement" }) } });
+  assert.equal(r.error, undefined);
+  assert.ok(r.creatures.every((c) => c.can === false && /frozen/.test(c.why_not)));
+});
+
+test("any `as` the act refuses, the read refuses: a human, an unknown kind", async () => {
+  const { worldApex } = await apex();
+  const { deps } = seams({ here: { x: 1010, y: 0 } });
+  for (const as of ["human", "companion"]) {
+    const r = await worldApex({ read: "watch", as }, KEY, { creatureDeps: deps });
+    assert.equal(r.error, "bounce", as);
+    assert.equal(r.code, 422, as);
+  }
+});
+
+test("a blurb is capped at the class grammar's 150, and a refused read lists every verb any creature in sight takes", async () => {
+  const { worldApex } = await apex();
+  const long = { ...LAW, affordedOf: (k) => LAW.affordedOf(k).map((a) => ({ ...a, effect: a.effect + " ".padEnd(200, "x") })) };
+  const s = seams({ living: THREE(), here: { x: 1010, y: 0 } });
+  const r = await worldApex({ read: "watch" }, KEY, { creatureDeps: { ...s.deps, creatures: async () => ({ living: THREE(), law: long }) } });
+  assert.ok(r.card.blurb.length <= 150 && r.card.blurb.endsWith("…"));
+  const entries = creatureEntries([{ verb: "watch", object: RAVEN }], { law: long, living: THREE(), now: NOW });
+  assert.ok(entries[0].blurb.length <= 150);
+  // hands empty: offer is not aimable, but the raven takes it, so the hint lists it
+  const empty = seams({ here: { x: 1010, y: 0 }, carrying: false });
+  const none = await worldApex({ read: "whisper" }, KEY, { creatureDeps: empty.deps });
+  assert.equal(none.error, "bounce");
+  assert.match(none.hint, /Readable from here: watch, approach, shoo, call, offer\./);
+});

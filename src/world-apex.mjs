@@ -3792,7 +3792,10 @@ async function apexReadAction(args, key, ctx = {}) {
   // never find it, and answered "not an action anywhere in your view". Anything you can
   // do, you can read; a read performs nothing (readCreatureVerb writes no row).
   if (CREATURE_VERBS.includes(action)) {
-    if (args.as === "human") return bounce(422, "a creature's afforded actions are a resident's", 'read them as one of your residents (handle:), never as: "human".');
+    // the act resolves `as` first (an unknown kind, an agent-held key, a human): so does the read
+    const asker = resolveHumanActor({ action, as: args.as, beside: args.beside, key, fence: "calculus" });
+    if (asker?.error) return asker;
+    if (asker) return bounce(422, "a creature's afforded actions are a resident's", 'read them as one of your residents (handle:), never as: "human".');
     try {
       return await readCreatureVerb(action, { ...(envelope ?? {}), ...(args.handle ? { handle: args.handle } : {}) }, key, ctx.creatureDeps ?? {});
     } catch (e) {

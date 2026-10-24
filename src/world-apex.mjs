@@ -113,7 +113,7 @@ import { validateReadArgs } from "./validate-args.mjs"; // the flat tools' own v
 import { callHoldTool, holdingsOf, liveHolder, nearestIds } from "./world-hold.mjs";
 import { termsId, termsOnce } from "./terms-seen.mjs"; // POS-697 G5a: the law you were shown, named on a repeat act
 import { onlyUsable, canOn, viewMarkIds, CREATURE_VERBS } from "./usable-verbs.mjs"; // verbs show when usable (LOGOS v2, O2)
-import { worldCreature, creatureEntries, CREATURE_TOOLS } from "./creature-verbs.mjs"; // a creature's afforded actions (POS-672)
+import { worldCreature, creatureEntries, readCreatureVerb, CREATURE_TOOLS } from "./creature-verbs.mjs"; // a creature's afforded actions (POS-672)
 // The stride a placement is stamped with — read off the record like every other
 // departure's, never a constant here (decision 008b).
 import { departurePace } from "./world-classes.mjs";
@@ -1923,6 +1923,15 @@ async function usableHere(args, key, oriented, nearby = []) {
   } catch { return null; }
 }
 
+/** The creature law and the living set the creature cards quote (blurb, class, fields), or none. */
+async function creatureCardContext() {
+  try {
+    const { creaturesForRead } = await import("./creatures-read.mjs");
+    const cr = await creaturesForRead();
+    return cr?.law && cr?.living ? { law: cr.law, living: cr.living } : {};
+  } catch { return {}; }
+}
+
 /** The creature columns of the matrix at a standpoint (creature-verbs.mjs § creaturePairs), or none. */
 async function creaturePairsHere(who, here) {
   try {
@@ -2644,7 +2653,9 @@ async function apexRead(args, key, ctx = {}) {
   const usable = await usableHere(args, key, oriented, nearby);
   if (usable) actions = onlyUsable(actions, usable);
   // a creature in sight lends its afforded actions (POS-672): each verb once, the creatures it reaches named
-  if (usable) actions = [...actions, ...creatureEntries(usable)];
+  // each card quotes the class mark's own words (its blurb) and names its fields, so the glance
+  // teaches the act and `read: "<verb>"` can answer for it (the 10-24 bug report)
+  if (usable) actions = [...actions, ...creatureEntries(usable, await creatureCardContext())];
 
   // ── Stage ② · whose grant opened each door ────────────────────────────────
   //
@@ -3772,6 +3783,22 @@ async function apexReadAction(args, key, ctx = {}) {
     const renamed = findRenamed(fields.q == null ? "" : String(fields.q).trim());
     if (found?.error) return { ...found, read: FIND_READ, card: FIND_CARD, renamed };
     return { read: FIND_READ, card: FIND_CARD, ...found, renamed };
+  }
+
+  // A CREATURE'S AFFORDED ACTION, READ (the 2026-10-24 bug post): the bare read lists
+  // watch, approach and the rest under granted.here when a creature is in sight, and the
+  // act goes to its own door before the grant calculus (apexDo). Its shadow must go the
+  // same way: no ground or class at a standpoint grants it, so the calculus below can
+  // never find it, and answered "not an action anywhere in your view". Anything you can
+  // do, you can read; a read performs nothing (readCreatureVerb writes no row).
+  if (CREATURE_VERBS.includes(action)) {
+    if (args.as === "human") return bounce(422, "a creature's afforded actions are a resident's", 'read them as one of your residents (handle:), never as: "human".');
+    try {
+      return await readCreatureVerb(action, { ...(envelope ?? {}), ...(args.handle ? { handle: args.handle } : {}) }, key, ctx.creatureDeps ?? {});
+    } catch (e) {
+      if (!e?.code) throw e;
+      return { ...actCaught(e), read: action };
+    }
   }
 
   const oriented = await worldOrient(args, key, { roll: ctx.roll ?? [] }); // DEC-11: the town roll rides into `present`

@@ -8,6 +8,7 @@
 // The tool descriptions deliberately carry the town's manners — chat agents
 // arrive with no CONTRIBUTING.md in context, so the contract IS the etiquette.
 
+import { dateFilterDefect } from "./date-filter.mjs";
 import { readBody, isBodyTooLarge, refuseTooLarge } from "./body.mjs";
 import { LETTER_READING_LAW_LINE, identityOf, DOORSTEP_SEGMENTS } from "./queries.mjs";
 import { storeAnswer, repoLog as repoLogFromStore, regionList as regionListFromStore, bulletinList as bulletinListFromStore, bulletinTeaser as bulletinTeaserFromStore, bulletinEntry as bulletinEntryFromStore, home as homeFromStore, stampsRoster as stampsRosterFromStore, stampsDetail as stampsDetailFromStore, questIndexRows, questBoardOfRows } from "./town-index-store.mjs"; // POS-268: the town index, the store's
@@ -651,6 +652,11 @@ async function fromStore(fn, then = null) {
 export async function callTool(name, args, ctx) {
   const { db, key, asOf, canWrite, clone, pen, odb, rdb, worldWriteBudget } = ctx;
   const notFound = (what, hint) => ({ error: "bounce", defect: what, hint });
+  // since/until are ISO dates (date-filter.mjs): an unreadable one is refused, not read as an empty roll or as no filter
+  if (name === "list_residents" || name === "list_mail" || name === "list_commits" || name === "list_letters") {
+    const bad = dateFilterDefect(args, name === "list_residents" ? ["since"] : undefined);
+    if (bad) return { error: "bounce", ...bad };
+  }
   if (name === "world" || name.startsWith("world_")) {
     try {
       // The apex dispatches into the same implementations the flat verbs use,

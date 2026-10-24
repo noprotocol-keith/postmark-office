@@ -127,19 +127,28 @@ test("stampsRoster and stampsDetail answer as their office.db twins did", async 
     await same(`stampsDetail ${h}`, store.stampsDetail(api, h));
 });
 
-test("a fractional or enormous limit/offset pages the store as it pages office.db, never a 500", async (t) => {
+test("a fractional or enormous limit/offset pages the store as its whole number, never a 500", async (t) => {
   if (skip) return t.skip(skip);
-  const meta = Object.fromEntries(db.prepare("SELECT key, value FROM meta").all().map((r) => [r.key, r.value]));
   // Postgres binds LIMIT/OFFSET as bigint: "2.5" and "1e+30" are not integers
   // to it, and the door answered "nothing in your request caused it" (500).
-  const asks = [{ limit: 2.5 }, { offset: 1.5, limit: 2 }, { offset: 1e30 }, { limit: 1e30, offset: Infinity }, { limit: "2.9", offset: "1.1" }];
-  for (const a of asks) {
-    await same(`stampsRoster ${JSON.stringify(a)}`, office.stampsRoster(db, meta, a), store.stampsRoster(api, a));
-    await same(`repoLog ${JSON.stringify(a)}`, office.repoLog(db, a), store.repoLog(api, a));
-    await same(`regionList ${JSON.stringify(a)}`, office.regionList(db, a), store.regionList(api, a));
+  // Against the store only (office.db is retired): the fractional ask must
+  // answer exactly what its floored twin answers, as the bytes a door sends.
+  const readers = { stampsRoster: store.stampsRoster, repoLog: store.repoLog, regionList: store.regionList };
+  const pairs = [
+    [{ limit: 2.5 }, { limit: 2 }],
+    [{ offset: 1.5, limit: 2 }, { offset: 1, limit: 2 }],
+    [{ limit: "2.9", offset: "1.1" }, { limit: 2, offset: 1 }],
+  ];
+  for (const [name, read] of Object.entries(readers)) {
+    for (const [asked, whole] of pairs) {
+      assert.deepEqual(await read(api, asked), await read(api, whole), `${name} ${JSON.stringify(asked)} reads as ${JSON.stringify(whole)}`);
+    }
+    for (const huge of [{ offset: 1e30 }, { limit: 1e30, offset: Infinity }]) {
+      await assert.doesNotReject(read(api, huge), `${name} ${JSON.stringify(huge)} is past the end, not a throw`);
+    }
   }
-  assert.equal(office.stampsRoster(db, meta, { limit: 2.5 }).limit, 2, "the echoed limit is the whole number that paged");
-  assert.equal(office.stampsRoster(db, meta, { limit: 2, offset: 1.5 }).offset, 1, "so is the offset");
+  assert.equal((await store.stampsRoster(api, { limit: 2.5 })).limit, 2, "the echoed limit is the whole number that paged");
+  assert.equal((await store.stampsRoster(api, { limit: 2, offset: 1.5 })).offset, 1, "so is the offset");
 });
 
 test("the store's as-of is the index's own", async (t) => {

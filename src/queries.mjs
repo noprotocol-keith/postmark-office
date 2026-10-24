@@ -1545,7 +1545,7 @@ export function doorstepOf(parts, handle, asOf, { conversationsOffset = 0, slim 
     .filter((a) => a.joined)
     .sort((a, b) => b.joined.localeCompare(a.joined) || a.handle.localeCompare(b.handle))
     .slice(0, 5);
-  const offset = Math.max(Number(conversationsOffset) || 0, 0);
+  const offset = Math.max(wholeNumber(conversationsOffset) || 0, 0);
   const mailLimit = slim ? DOORSTEP_INBOX_SLIM : DOORSTEP_INBOX;
   // Composed before the page rather than inside it, for one reason: `moved`
   // below names the per-row fields this cut dropped, and it can only name the

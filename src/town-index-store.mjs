@@ -645,7 +645,7 @@ export async function doorstep(q, handle, _asOf, opts = {}) {
   const { nowMs = Date.now(), conversationsOffset = 0, fresh = null, slim = false, standing = null } = opts;
   if (!(await hasResident(q, handle))) return null;
   const asOf = await townIndexAsOf(q);
-  const offset = Math.max(Number(conversationsOffset) || 0, 0);
+  const offset = Math.max(wholeNumber(conversationsOffset) || 0, 0);
   const one = (sql, params = []) => count(q, sql, params);
   const parts = {
     arrivals: (await roster(q)).map((e) => ({ handle: e.handle, joined: e.joined, is_office: e.is_office })),

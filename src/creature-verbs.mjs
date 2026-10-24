@@ -273,9 +273,9 @@ export async function readCreatureVerb(verb, fields = {}, key = null, deps = {})
   rows.sort((p, q) => p.distance_m - q.distance_m);
   if (!rows.length) {
     const near = living.living(now).filter((c) => distanceM(here, c) <= SIGHT_M).map((c) => c.id);
+    const readable = [...new Set(creaturePairs({ here, living, law, carryingConsumable: await d.carryingConsumable(actor), now, env: d.env }).map((p) => p.verb))];
     throw bounce(422, only ? `"${verb}" is not something you can aim at ${only} from here` : `"${verb}" is not an action anywhere in your view: no creature in sight takes it`,
-      near.length ? `Creatures in sight: ${near.join(", ")}.` : `no creature is in sight; world { find: "creature" } names the nearest.`,
-      { readable_here: [...new Set(creaturePairs({ here, living, law, carryingConsumable: await d.carryingConsumable(actor), now, env: d.env }).map((p) => p.verb))] });
+      `${near.length ? `Creatures in sight: ${near.join(", ")}.` : `No creature is in sight; world { find: "creature" } names the nearest.`} Readable from here: ${readable.join(", ") || "(nothing)"}.`);
   }
   const first = (law.affordedOf(rows[0].kind) ?? []).find((x) => x.action === verb);
   const card = { action: verb, channel: "creature", via: "in sight", blurb: first.effect, blurb_from: first.from_class, class: first.from_class, from: first.from_class,

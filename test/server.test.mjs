@@ -347,7 +347,7 @@ test("GET /letters filters: resident, since/until, region, exclude-office, combi
 test("an unreadable since/until is a 422, never an empty roll marked complete or a filter that was ignored", async () => {
   // `since=yesterday` sorts after every digit (0 rows, complete: true);
   // `since=10/01/2026` sorts before every digit (the filter vanishes).
-  for (const bad of ["yesterday", "10/01/2026", "2026-13-45", "2026-02-30", "2026-10-1", "2026-07-03T25:00:00Z", "2026-07-03T08:30:00+02:00", "2026-07-03T08:30"]) {
+  for (const bad of ["yesterday", "10/01/2026", "2026-13-45", "2026-02-30", "2026-10-1", "2026-07-03T25:00:00Z", "2026-07-03T08:30:00+25:00", "2026-07-03Tnoon"]) {
     for (const door of ["/letters?since=", "/letters?until=", "/mail/wright?since=", "/repo/log?until=", "/residents?since="]) {
       const r = await get(door + encodeURIComponent(bad));
       assert.equal(r.status, 422, `${door}${bad}`);
@@ -356,10 +356,12 @@ test("an unreadable since/until is a 422, never an empty roll marked complete or
       assert.match(b.hint, /^send \?(since|until)=2026-10-01$/, "the hint says what to send over HTTP");
     }
   }
-  // what was readable stays readable: a date, and a UTC timestamp. An offset or a zoneless time is refused above, because the filter compares strings and would read it as UTC without saying so.
-  assert.match((await (await get("/letters?since=" + encodeURIComponent("2026-07-03T08:30:00+02:00"))).json()).defect, /UTC timestamp ending in Z/);
-  for (const ok of ["2026-07-03", "2026-07-03T08:30:00.000Z", "2026-07-03T08:30Z"]) {
-    assert.equal((await get("/letters?since=" + encodeURIComponent(ok))).status, 200, ok);
+  // what worked keeps working: a date, a Z timestamp, +00:00 (Python isoformat), a zoneless time (read as UTC), and an offset (converted to UTC)
+  const total = async (v) => (await (await get("/letters?limit=1&since=" + encodeURIComponent(v))).json()).total;
+  assert.equal(await total("2026-07-03T08:30:00+02:00"), await total("2026-07-03T06:30:00.000Z"), "an offset is converted to UTC");
+  assert.equal(await total("2026-07-03T06:30:00+00:00"), await total("2026-07-03T06:30:00Z"), "+00:00 reads as Z");
+  assert.equal(await total("2026-07-03T06:30"), await total("2026-07-03T06:30:00Z"), "a zoneless time reads as UTC");
+  for (const ok of ["2026-07-03", "2026-07-03T08:30:00.000Z", "2026-07-03T08:30Z", "2026-07-03T08:30:00+00:00", "2026-07-03T08:30", "2026-07-03T08:30:00+02:00"]) {    assert.equal((await get("/letters?since=" + encodeURIComponent(ok))).status, 200, ok);
   }
   assert.equal((await get("/letters")).status, 200);
 });

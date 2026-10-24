@@ -8,29 +8,51 @@
 // Both are well-formed answers to a question nobody asked, and `complete: true`
 // is the field a caller reads to decide there is nothing more. Refuse instead,
 // naming the shape the filter wants.
-// A bare date, or a UTC timestamp ending in Z. The filter compares strings, so an offset
-// (+02:00) or a zoneless time would be read as UTC without saying so: refused instead.
-const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?Z)?$/;
+//
+// What is accepted, and how it is read:
+//   - a bare date (2026-10-01): left as it is; it covers the whole day.
+//   - any ISO timestamp: 2026-07-03T08:30, ...:30:00, ...:30:00.123, with a
+//     trailing Z or an offset (+00:00, +02:00). A ZONELESS time is read as UTC
+//     (what Python's utcnow().isoformat() sends), and an offset is converted to
+//     UTC; the value handed down is always new Date(v).toISOString(), so the
+//     string comparison sees a UTC moment. Spellings that already worked keep
+//     working (the town's rule: a working spelling never breaks without notice).
+const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-](\d{2}):(\d{2}))?)?$/;
 
-export function isIsoDateFilter(v) {
+function readFilter(v) {
   const m = ISO.exec(String(v));
-  if (!m) return false;
-  const [y, mo, d, h = 0, mi = 0, s = 0] = m.slice(1).map((x) => (x === undefined ? 0 : Number(x)));
-  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || s > 59) return false;
-  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (!m) return null;
+  const [y, mo, d] = [m[1], m[2], m[3]].map(Number);
+  const [h, mi, s] = [m[4], m[5], m[6]].map((x) => (x === undefined ? 0 : Number(x)));
+  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || s > 59) return null;
+  if (d > new Date(Date.UTC(y, mo, 0)).getUTCDate()) return null;
+  if (m[4] === undefined) return { bare: true, value: String(v) };
+  if (m[8] !== undefined && (Number(m[8]) > 23 || Number(m[9]) > 59)) return null;
+  const t = new Date(m[7] ? String(v) : `${v}Z`);
+  return Number.isNaN(t.getTime()) ? null : { bare: false, value: t.toISOString() };
 }
 
-/** The first of `names` in `opts` that is present and not an ISO date, as a bounce body; null when all are fine. */
+export function isIsoDateFilter(v) {
+  return readFilter(v) !== null;
+}
+
+/**
+ * The first of `names` in `opts` that is present and not an ISO date, as a bounce body; null when all are fine.
+ * As a side effect a readable timestamp in `opts` is replaced by its UTC form (new Date(v).toISOString()),
+ * so the caller's comparison is against UTC; a bare date is left as sent.
+ */
 export function dateFilterDefect(opts, names = ["since", "until"], door = "http") {
   for (const name of names) {
     const v = opts?.[name];
     if (v === undefined || v === null || v === "") continue;
-    if (!isIsoDateFilter(v))
+    const r = readFilter(v);
+    if (!r)
       return {
         code: 422, field: name,
-        defect: `${name} must be an ISO date (YYYY-MM-DD) or a UTC timestamp ending in Z, not "${String(v).slice(0, 40)}"`,
+        defect: `${name} must be an ISO date (YYYY-MM-DD) or an ISO timestamp (an offset is converted to UTC; no zone reads as UTC), not "${String(v).slice(0, 40)}"`,
         hint: door === "mcp" ? `send ${name}: "2026-10-01"` : `send ?${name}=2026-10-01`,
       };
+    opts[name] = r.value;
   }
   return null;
 }

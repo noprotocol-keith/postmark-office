@@ -292,8 +292,8 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: {
       path: { type: "string", description: "repo-relative path prefix, e.g. WHITE_PAGES/little-bird/" },
       author: { type: "string", description: "substring of the commit author" },
-      since: { type: "string", description: "inclusive ISO date or timestamp" },
-      until: { type: "string", description: "inclusive ISO date or timestamp" },
+      since: { type: "string", description: "inclusive ISO date, or any ISO timestamp (an offset is converted to UTC; no zone reads as UTC); anything else is a 422 naming the field" },
+      until: { type: "string", description: "inclusive ISO date, or any ISO timestamp (an offset is converted to UTC; no zone reads as UTC); anything else is a 422 naming the field" },
       limit: { type: "number", description: "commits to return (default 30, max 200)" },
       offset: { type: "number", description: "how many to skip — walk history with the next_offset the previous page returned" },
     }, additionalProperties: false } },

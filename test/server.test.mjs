@@ -293,11 +293,14 @@ test("PATCH /profile/{handle}/avatar reaches the REST image door and keeps its b
       headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ image: jpeg.toString("base64"), type: "image/png" }),
     });
-    assert.equal(saved.status, 200);
-    const receipt = await saved.json();
-    assert.equal(receipt.avatar, "avatar.jpg");
-    assert.equal(receipt.media_type, "image/jpeg");
-    assert.match(readFileSync(join(clone, "WHITE_PAGES", "wright", "PROFILE.md"), "utf8"), /avatar: "avatar\.jpg"/);
+    // WLD-83 (one picture, not two): the door mints a whole picture through the
+    // media door and keeps its URL. This office has no storage credentials, so
+    // the media door answers not-yet-open, honestly, and nothing is written; the
+    // mint and the one key are proved in edit.test.mjs with the door recorded.
+    const before = readFileSync(join(clone, "WHITE_PAGES", "wright", "PROFILE.md"), "utf8");
+    assert.equal(saved.status, 409);
+    assert.match((await saved.json()).defect, /the media door is not yet open/);
+    assert.equal(readFileSync(join(clone, "WHITE_PAGES", "wright", "PROFILE.md"), "utf8"), before, "nothing written without a mint");
 
     const truncated = await fetch(`http://127.0.0.1:${port}/profile/wright/avatar`, {
       method: "PATCH",
@@ -580,7 +583,15 @@ test("MCP tools/list, apex OFF: the full flat list — the slim's delist is apex
   // 58 -> 59 (the town's docs, 2026-10-06, #379): read_docs —
   // town { read: "docs" }. Born delisted behind the town apex. The counts moved
   // in the same commit.
-  assert.equal(names.length, 59);
+  // 59 -> 60 (WLD-83, 2026-10-19): world_describe — world { do: "describe" },
+  // a resident describing itself. Born delisted behind the world apex. The
+  // counts moved in the same commit.
+  // 60 -> 64 (POS-666, 2026-10-22): amend_letter, withdraw_letter,
+  // block_household and unblock_household — household { do: "amend-letter" |
+  // "withdraw-letter" | "block" | "unblock" }. Born delisted behind the
+  // household apex. The counts moved in the same commit.
+  assert.equal(names.length, 64);
+  assert.ok(names.includes("world_describe"), "the describe act has a flat definition, delisted only while the apex serves it");
   assert.ok(names.includes("read_docs"), "the docs read has a flat definition, delisted only while the apex serves it");
   assert.ok(names.includes("read_posts"), "the posts read has a flat definition, delisted only while the apex serves it");
   assert.ok(names.includes("read_earpiece"), "the earpiece's log has a flat definition, delisted only while the apex serves it");
@@ -663,6 +674,11 @@ test("GET /world/store is a keyless read that reports mode off when nothing is f
   assert.match(h.eligibility, /blessed reads only/);   // the bless overrides the tick (postmark#2934)
   // no world clone here, so freshness cannot be established — and says so
   assert.ok(h.main.error || h.blessed?.fresh === false, `expected an honest main answer, got ${JSON.stringify(h.main)}`);
+  // keyless, so plain (POS-663): anyone may read this, so it names no path on
+  // the box and carries no raw error, only shas, counts and the office's words
+  const body = JSON.stringify(h);
+  assert.equal(/"(repo|path)":/.test(body), false, `a path key on the keyless panel: ${body.slice(0, 300)}`);
+  assert.equal(/\/srv\/|fatal:|not a git repository|ENOENT/i.test(body), false, `a box path or a raw error on the keyless panel: ${body.slice(0, 300)}`);
   // flag-off equivalence at the HTTP layer: no extra header appears on ANY
   // response, so a flags-off office is byte-identical on the wire too
   assert.equal(res.headers.get("x-postmark-world-store-as-of"), null);
@@ -1009,4 +1025,35 @@ test("GET /posts takes a class: none → 422 naming it; an idea is a post class 
   // POS-558: the bug read pages, and the door hands it limit and offset
   const bugs = await (await get("/posts?class=bug&limit=7&offset=3", null)).json();
   assert.deepEqual([bugs.total, bugs.shown, bugs.limit, bugs.offset, bugs.complete, bugs.catchers, bugs.posts], [0, 0, 7, 3, true, [], []]);
+});
+
+// POS-778: the posts list is not silent about what it ignores. An unknown
+// parameter is a 400 naming the nearest known one; stage is state's alias and
+// is known; state= is a real filter with counts beside it.
+test("GET /posts: ?stage=x is not refused (it is the alias), ?stags= answers 400 naming `stage`, ?state= filters and counts_by_state rides", async () => {
+  const typo = await get("/posts?class=bug&stags=reproduced", null);
+  assert.equal(typo.status, 400);
+  const body = await typo.json();
+  assert.match(body.defect, /no parameter `stags`; did you mean `stage`\?/);
+  assert.match(body.hint, /state/);
+  const odd = await get("/posts/postmark-pen/first-idea?class=idea&colour=red", null);
+  assert.equal(odd.status, 400, "the one-post read judges its parameters too");
+  assert.match((await odd.json()).defect, /no parameter `colour`/);
+
+  const state = await get("/posts?class=bug&state=reproduced", null);
+  assert.equal(state.status, 200);
+  const s = await state.json();
+  assert.deepEqual([s.total, s.state], [0, ["reproduced"]]);
+  assert.equal(s.counts_by_state.reproduced, 0);
+  assert.deepEqual(Object.keys(s.counts_by_state), ["reported", "confirmed", "reproduced", "diagnosed", "briefed", "fixed", "shipped", "duplicate", "not-a-bug"]);
+
+  const alias = await get("/posts?class=bug&stage=reproduced", null);
+  assert.equal(alias.status, 200, "stage is a permanent alias, never refused");
+  const a = await alias.json();
+  assert.equal(a.total, 0);
+  assert.match(a.note, /stage is an alias of state/);
+
+  const bogus = await get("/posts?class=bug&state=nonsense", null);
+  assert.equal(bogus.status, 422);
+  assert.match((await bogus.json()).defect, /"nonsense" is not a bug state/);
 });

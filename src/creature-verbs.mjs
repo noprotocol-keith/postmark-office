@@ -37,12 +37,19 @@
 // afforded actions (a blessing before the world half) refuses every verb with
 // its reason and shows none.
 
-import { capOf, dial, distanceM, judgeMode } from "./creatures.mjs";
+import { capOf, dial, distanceM, judgeMode, ringHolds, seesCreature } from "./creatures.mjs";
 import { PRESENCE_DIALS } from "./dynamic-presence.mjs";
 import { CREATURE_CALLS, WHISPER_WORDS } from "./world-read-shape.mjs";
+import { DODGE_ACTION, PERSUADE_ACTION, isSetPiece, openHurls, persuadedThisWindow, pieceOf } from "./set-pieces.mjs";
+import { windowAt } from "./encounter.mjs";
 
 /** The six verbs this door answers (the world's AFFORDED_VERBS, as ruled). */
 export const CREATURE_VERBS = Object.freeze(["watch", "approach", "shoo", "call", "offer", "whisper"]);
+/** A fight in set pieces' own two (set-pieces.mjs): dodge, while a feint is aimed at you, and persuade, in
+ *  its unbreakable piece. The apex hands them here only once the blessed law knows them (world-apex.mjs § fightsLive). */
+export const FIGHT_VERBS = Object.freeze([DODGE_ACTION, PERSUADE_ACTION]);
+/** A persuade's words, at most (a few sentences: the household's own). */
+export const PERSUADE_MAX = 280;
 /** W2: how long an aimed act's answer waits for its creature, and Jev's share of it. */
 export const AIMED_WAIT_MS = 3000;
 export const AIMED_JEV_MS = 2500;
@@ -83,14 +90,28 @@ const theOf = (law, c) => nameOf(law, c).replace(/^an? /i, "the ");
  * Why `verb` cannot be aimed at creature `c` from `d` metres, or null when it
  * can. The one judgment both the door and the matrix read, so they cannot differ.
  */
-export function whyNot(verb, c, d, { law, carryingConsumable = false } = {}) {
+export function whyNot(verb, c, d, { law, carryingConsumable = false, here = null, living = null, actor = null, household = null, now = Date.now() } = {}) {
   const a = (law?.affordedOf?.(c.kind) ?? []).find((x) => x.action === verb);
   if (!a) return `${nameOf(law, c)} does not take ${verb}`;
+  // a fight in set pieces (set-pieces.mjs): a dodge only from a feint aimed at you; a persuade only in its
+  // unbreakable piece, once per household each settlement
+  if (FIGHT_VERBS.includes(verb)) {
+    const fight = isSetPiece(law?.kindOf?.(c.kind)) ? law.fightOf?.(c.kind) ?? null : null;
+    if (!fight) return `${theOf(law, c)}'s fight cannot be read here`;
+    if (verb === DODGE_ACTION && !openHurls(living, c, now).some((h) => h.object === actor && now <= Date.parse(h.payload.until)))
+      return `nothing ${theOf(law, c)} threw is aimed at you to dodge`;
+    if (verb === PERSUADE_ACTION && pieceOf(c, fight, now).piece !== "unbreakable") return `${theOf(law, c)} cannot be persuaded now`;
+    if (verb === PERSUADE_ACTION && household && persuadedThisWindow(living, c, household, now))
+      return `your household has persuaded ${theOf(law, c)} this settlement; once each, until ${new Date(windowAt(now).ends).toISOString().slice(11, 16)}Z`;
+  }
   const ring = ringOf(law, c);
-  if (a.from === "ring" && !(d <= ring))
-    return `${theOf(law, c)} is ${Math.round(d)} m off, and ${verb} is from inside its ring (${ring} m)`;
-  if (a.from !== "ring" && !(d <= SIGHT_M))
-    return `${theOf(law, c)} is ${Math.round(d)} m off, out of sight (${verb} is from within ${SIGHT_M} m)`;
+  // `here`: where you stand, so the ring's walls are read too (creatures.mjs § ringHolds, world#268)
+  if (a.from === "ring" && !(here ? ringHolds(law, c, here) : d <= ring))
+    return d <= ring ? `${theOf(law, c)} is beyond the walls of the room you stand in, and ${verb} is from inside its ring`
+      : `${theOf(law, c)} is ${Math.round(d)} m off, and ${verb} is from inside its ring (${ring} m)`;
+  if (a.from !== "ring" && !(here ? seesCreature(law, c, here, SIGHT_M) : d <= SIGHT_M))
+    return d <= SIGHT_M ? `${theOf(law, c)} is beyond the walls of the room you stand in, out of sight (${verb} is from where you can see it)`
+      : `${theOf(law, c)} is ${Math.round(d)} m off, out of sight (${verb} is from within ${SIGHT_M} m)`;
   if (verb === "approach" && d <= ring * APPROACH_STOP)
     return `you are already within ${Math.round(ring * APPROACH_STOP)} m of ${theOf(law, c)}`;
   if (verb === "offer" && !carryingConsumable) return "you carry nothing to offer";
@@ -115,14 +136,14 @@ function remedy(verb, c, law, actor) {
  * `here` is your standpoint; `living` and `law` the creatures as this process
  * folds them; `carryingConsumable` whether your hands hold a consumable kind.
  */
-export function creaturePairs({ here, living, law, carryingConsumable = false, now = Date.now(), env = process.env }) {
+export function creaturePairs({ here, living, law, carryingConsumable = false, now = Date.now(), env = process.env, actor = null, household = null }) {
   if (!here || !living || !law?.afforded || judgeMode(env) === "off") return [];
   const pairs = [];
   for (const c of living.living(now)) {
     const d = distanceM(here, c);
-    if (!(d <= SIGHT_M)) continue;
+    if (!seesCreature(law, c, here, SIGHT_M)) continue; // its sight ends at its room's walls (F4)
     for (const a of law.affordedOf(c.kind))
-      if (!whyNot(a.action, c, d, { law, carryingConsumable })) pairs.push({ verb: a.action, object: c.id });
+      if (!whyNot(a.action, c, d, { law, carryingConsumable, here, living, actor, household, now })) pairs.push({ verb: a.action, object: c.id });
   }
   return pairs;
 }
@@ -130,7 +151,7 @@ export function creaturePairs({ here, living, law, carryingConsumable = false, n
 /** The read's action entries for the creature verbs in `pairs`, one per verb (the bare `can` lists each verb once). */
 export function creatureEntries(pairs, { law = null, living = null, now = Date.now() } = {}) {
   const out = [];
-  for (const verb of CREATURE_VERBS) {
+  for (const verb of [...CREATURE_VERBS, ...FIGHT_VERBS]) {
     const on = pairs.filter((p) => p.verb === verb).map((p) => p.object);
     if (!on.length) continue;
     out.push({ action: verb, channel: "creature", via: "in sight", creatures: on, ...cardOf(verb, on, { law, living, now }) });
@@ -146,7 +167,7 @@ const capBlurb = (t) => { const x = String(t ?? ""); return x.length > BLURB_MAX
 export function fieldsOf(verb) {
   const props = CREATURE_TOOLS[0].inputSchema.properties;
   return Object.fromEntries(Object.entries(props).filter(([k]) =>
-    k === "creature" || k === "handle" || (k === "kind" && verb === "offer") || (k === "words" && (verb === "call" || verb === "whisper"))));
+    k === "creature" || k === "handle" || (k === "kind" && verb === "offer") || (k === "words" && (verb === "call" || verb === "whisper" || verb === PERSUADE_ACTION))));
 }
 
 /**
@@ -188,7 +209,7 @@ function actorOf(args, key) {
 export async function worldCreature(args = {}, key = null, deps = {}) {
   const d = { ...(await liveDeps(deps)), ...deps };
   const verb = String(args.act ?? "").trim();
-  if (!CREATURE_VERBS.includes(verb))
+  if (!CREATURE_VERBS.includes(verb) && !FIGHT_VERBS.includes(verb))
     throw bounce(422, `"${verb}" is not a creature's afforded action`, `the afforded actions are ${CREATURE_VERBS.join(", ")}. Nothing was done.`);
   const fz = d.freeze?.();
   if (fz) return fz;
@@ -210,7 +231,7 @@ export async function worldCreature(args = {}, key = null, deps = {}) {
   if (!here) throw bounce(422, `the world doesn't know where ${actor} stands yet`, "an afforded action is taken from where you stand: walk somewhere first. Nothing was done.");
   const raw = String(args.creature ?? "").trim();
   if (!raw) {
-    const near = living.living(now0).filter((c) => distanceM(here, c) <= SIGHT_M).map((c) => c.id);
+    const near = living.living(now0).filter((c) => seesCreature(cr.law, c, here, SIGHT_M)).map((c) => c.id);
     throw bounce(422, `${verb} which creature?`, near.length ? `creature: one of ${near.join(", ")}. Nothing was done.` : `no creature is in sight; world { find: "creature" } names the nearest. Nothing was done.`);
   }
   const id = raw.startsWith("creature:") ? raw : `creature:${raw}`;
@@ -239,7 +260,9 @@ export async function worldCreature(args = {}, key = null, deps = {}) {
  * (kind, words, nonce) is refused by name.
  */
 export async function readCreatureVerb(verb, fields = {}, key = null, deps = {}) {
-  if (!CREATURE_VERBS.includes(verb)) throw bounce(422, `"${verb}" is not a creature's afforded action`, `the afforded actions are ${CREATURE_VERBS.join(", ")}.`);
+  // the read answers for every verb the act's door answers: the afforded six, and the fight's own two (the apex routes
+  // the fight's only once the blessed law knows them: world-apex.mjs § fightsLive)
+  if (!CREATURE_VERBS.includes(verb) && !FIGHT_VERBS.includes(verb)) throw bounce(422, `"${verb}" is not a creature's afforded action`, `the afforded actions are ${[...CREATURE_VERBS, ...FIGHT_VERBS].join(", ")}.`);
   for (const f of ["kind", "words", "nonce"])
     if (fields[f] != null) throw bounce(422, `a read never performs: ${f} is the act's`, `${CREATURE_CALLS[verb]} aims it. read: "${verb}" only shows who it can be aimed at and why not.`);
   const unknown = Object.keys(fields).filter((k) => k !== "handle" && k !== "creature");
@@ -255,6 +278,7 @@ export async function readCreatureVerb(verb, fields = {}, key = null, deps = {})
   const here = await d.standpoint(actor);
   if (!here) throw bounce(422, `the world doesn't know where ${actor} stands yet`, "an afforded action is taken from where you stand: walk somewhere first.");
   const carrying = verb === "offer" ? await d.carryingConsumable(actor) : false;
+  const household = verb === PERSUADE_ACTION ? await d.householdOf(actor) : null; // persuade is once each per household, as the act judges it
   const frozen = d.freeze?.() ?? null; // the act answers a freeze before anything else: so does the read, per row
 
   const raw = String(fields.creature ?? "").trim();
@@ -262,10 +286,11 @@ export async function readCreatureVerb(verb, fields = {}, key = null, deps = {})
   const rows = [];
   for (const c of living.living(now)) {
     const dist = distanceM(here, c);
-    if (!(dist <= SIGHT_M)) continue;
+    // a creature behind the walls of its room is within SIGHT_M yet out of sight: it reads, with the act's own reason, can:false
+    if (!(dist <= SIGHT_M) && !seesCreature(law, c, here, SIGHT_M)) continue;
     const a = (law.affordedOf(c.kind) ?? []).find((x) => x.action === verb);
     if (!a || (only && c.id !== only)) continue;
-    let why = whyNot(verb, c, dist, { law, carryingConsumable: carrying });
+    let why = whyNot(verb, c, dist, { law, carryingConsumable: carrying, here, living, actor, household, now });
     let wait = 0;
     if (!why && capOf(c, actor, { now })) { why = "still answering you"; wait = windowLeftS(c, actor, now); } // D6, as the act judges it
     if (frozen) why = frozen.defect ?? "the world is frozen";
@@ -273,8 +298,8 @@ export async function readCreatureVerb(verb, fields = {}, key = null, deps = {})
   }
   rows.sort((p, q) => p.distance_m - q.distance_m);
   if (!rows.length) {
-    const near = living.living(now).filter((c) => distanceM(here, c) <= SIGHT_M).map((c) => c.id);
-    const readable = CREATURE_VERBS.filter((v) => living.living(now).some((c) => distanceM(here, c) <= SIGHT_M && (law.affordedOf(c.kind) ?? []).some((x) => x.action === v)));
+    const near = living.living(now).filter((c) => seesCreature(law, c, here, SIGHT_M)).map((c) => c.id);
+    const readable = [...CREATURE_VERBS, ...FIGHT_VERBS].filter((v) => living.living(now).some((c) => seesCreature(law, c, here, SIGHT_M) && (law.affordedOf(c.kind) ?? []).some((x) => x.action === v)));
     throw bounce(422, only ? `"${verb}" is not something you can aim at ${only} from here` : `"${verb}" is not an action anywhere in your view: no creature in sight takes it`,
       `${near.length ? `Creatures in sight: ${near.join(", ")}.` : `No creature is in sight; world { find: "creature" } names the nearest.`} Readable from here: ${readable.join(", ") || "(nothing)"}.`);
   }
@@ -306,7 +331,20 @@ export const AIM_GUARD_SQL = `SELECT 1 AS hit FROM (
     SELECT action, at, payload FROM acts WHERE actor = $2 ORDER BY id DESC LIMIT 50) its
   WHERE its.action = 'react' AND its.payload->>'to' = $1 AND its.at > now() - ($4::int * interval '1 millisecond')
   LIMIT 1`;
-export const AIM_ACTIONS = Object.freeze(["watch", "shoo", "call", "whisper", "units:offer"]);
+export const AIM_ACTIONS = Object.freeze(["watch", "shoo", "call", "whisper", "units:offer", DODGE_ACTION, PERSUADE_ACTION]);
+/** The record's half of once per household per settlement (a persuade), in the trigger's own transaction. */
+export const PERSUADED_SQL = `SELECT 1 AS hit FROM acts WHERE class = 'creature' AND object = $1 AND action = '${PERSUADE_ACTION}'
+  AND payload->>'household' = $2 AND at >= $3::timestamptz LIMIT 1`;
+export function persuadeGuard(actor, creature, household, { now = Date.now() } = {}) {
+  const aim = aimGuard(actor, creature);
+  return async (client) => {
+    await aim(client);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`creature-persuade:${creature}:${household}`]);
+    const { rows } = await client.query(PERSUADED_SQL, [String(creature), String(household), new Date(windowAt(now).start).toISOString()]);
+    if (rows.length) throw bounce(409, "your household has persuaded it this settlement",
+      `a persuade is once per household each settlement; try again after ${new Date(windowAt(now).ends).toISOString().slice(11, 16)}Z. Nothing was done.`);
+  };
+}
 export function aimGuard(actor, creature) {
   return async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`creature-aim:${actor}:${creature}`]);
@@ -327,7 +365,8 @@ async function aimAt({ d, args, key, verb, actor, id, here, cr }) {
   // FROM WHERE, AND WHAT YOU HOLD (D1, D3): the matrix's own judgment
   const dist = distanceM(here, c);
   const carryingConsumable = verb === "offer" ? await d.carryingConsumable(actor) : false;
-  const not = whyNot(verb, c, dist, { law, carryingConsumable });
+  const household = verb === PERSUADE_ACTION ? await d.householdOf(actor) : null;
+  const not = whyNot(verb, c, dist, { law, carryingConsumable, here, living, actor, household, now });
   if (not) throw bounce(not.includes("does not take") ? 422 : 409, not, remedy(verb, c, law, actor));
 
   // ONE AT A TIME (D6): refused before anything is written or used up
@@ -338,9 +377,11 @@ async function aimAt({ d, args, key, verb, actor, id, here, cr }) {
 
   // THE WORDS (D4)
   const hasWords = args.words != null && String(args.words).trim() !== "";
-  if (hasWords && verb !== "call" && verb !== "whisper") throw bounce(422, `${verb} carries no words`, "words go with a call or a whisper. Nothing was done.");
+  if (hasWords && verb !== "call" && verb !== "whisper" && verb !== PERSUADE_ACTION) throw bounce(422, `${verb} carries no words`, "words go with a call or a whisper. Nothing was done.");
+  if (!hasWords && verb === PERSUADE_ACTION) throw bounce(422, "a persuade carries your words", `words: what your household says to it, at most ${PERSUADE_MAX} characters. Nothing was done.`);
   const words = hasWords ? String(args.words).replace(/\s+/g, " ").trim() : null;
-  if (words && words.length > WORDS_MAX) throw bounce(422, `${words.length} characters is more than a ${verb} carries`, `at most ${WORDS_MAX}.${verb === "whisper" ? ` ${WHISPER_WORDS}` : ""} Nothing was done.`);
+  const most = verb === PERSUADE_ACTION ? PERSUADE_MAX : WORDS_MAX;
+  if (words && words.length > most) throw bounce(422, `${words.length} characters is more than a ${verb} carries`, `at most ${most}.${verb === "whisper" ? ` ${WHISPER_WORDS}` : ""} Nothing was done.`);
 
   // THE ACT'S OWN ROW: the trigger the creature answers (W1)
   let trigger = null;   // { actId, atIso }
@@ -377,9 +418,10 @@ async function aimAt({ d, args, key, verb, actor, id, here, cr }) {
     }
     const row = await d.write({
       actor, action: verb, object: id, cls: "creature",
-      payload: { kind: c.kind, ...(verb === "whisper" && words ? { words } : {}), ...(verb === "call" && words ? { said: true } : {}) },
-      effect: `${actor} ${{ watch: "watched", shoo: "shooed", call: "called to", whisper: "whispered to" }[verb]} ${theOf(law, c)}`,
-    }, key, { guard: aimGuard(actor, id) });
+      payload: { kind: c.kind, ...((verb === "whisper" || verb === PERSUADE_ACTION) && words ? { words } : {}), ...(verb === "call" && words ? { said: true } : {}),
+        ...(verb === PERSUADE_ACTION ? { household, window: windowAt(now).id } : {}) },
+      effect: `${actor} ${{ watch: "watched", shoo: "shooed", call: "called to", whisper: "whispered to", dodge: "dodged", persuade: "tried to persuade" }[verb]} ${theOf(law, c)}`,
+    }, key, { guard: verb === PERSUADE_ACTION ? persuadeGuard(actor, id, household, { now }) : aimGuard(actor, id) });
     trigger = { actId: String(row.actId), atIso: isoOf(row.written_at) ?? new Date(d.now()).toISOString() };
     if (words) extra = { words, ...(verb === "whisper" ? { words_note: WHISPER_WORDS } : {}) };
   }
@@ -402,7 +444,7 @@ const isoOf = (t) => { const ms = t instanceof Date ? t.getTime() : Date.parse(t
 
 /** The office's own collaborators, imported lazily; a test hands in its own. */
 async function liveDeps(given) {
-  const need = ["creatures", "standpoint", "carryingConsumable", "offer", "approach", "say", "write", "answer", "others", "freeze"]
+  const need = ["creatures", "standpoint", "carryingConsumable", "offer", "approach", "say", "write", "answer", "others", "freeze", "householdOf"]
     .filter((k) => !(k in given));
   if (!need.length) return { now: Date.now, clock: Date.now, env: process.env };
   const [hook, world, freeze, act, kinds, units, crossings, branches, journal] = await Promise.all([
@@ -425,6 +467,8 @@ async function liveDeps(given) {
     },
     answer: (a, deps) => hook.answerWithin(a, deps),
     others: (rows, except) => hook.creaturesAnswer(rows, {}, { except }).then((r) => r?.creatures ?? []),
+    // a persuade's household, as an encounter's ring reads it (creatures.mjs § householdsNow)
+    householdOf: async (h) => { const lk = await (await import("./creatures.mjs")).householdsNow().catch(() => null); return lk?.(h)?.key ?? `solo:${h}`; },
   };
 }
 

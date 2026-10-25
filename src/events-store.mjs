@@ -35,6 +35,8 @@ import { householdKeyFor } from "./world2-claims.mjs";
 import { holdsHand } from "./named-hand.mjs";
 import { sessionKeysVia } from "./household-deriver.mjs";
 import { currentCrossing } from "./crossings.mjs";
+import { rungWords } from "./post-words.mjs";
+import { apiUrl } from "./public-base.mjs";
 import { wakesNote, earpieceEnabled } from "./earpiece.mjs";
 import { WORLD_ANCHOR } from "./world-journal.mjs";
 import {
@@ -48,6 +50,7 @@ import {
 } from "./bugs.mjs";
 import { githubAuthorOf, judgeEarnedCreditVia } from "./bug-credit.mjs";
 import { ideaPostsOn } from "./ideas.mjs";
+import { REPORT_CLASS, REPORT_ID_RE, REPORT_NO_AMEND, REPORT_NO_CLOSE } from "./reports.mjs"; // POS-757: a report is amended and closed by no one
 import {
   EVENT_CLASS, ACT_POST, ACT_AMEND_POST, ACT_CLOSE, ACT_ADVANCE, ACT_REVEAL, ACT_RECREDIT, ACT_SKIP, ACT_RSVP, ACT_ANNOUNCE, ENDED_LIST_DAYS,
   STATE_CANCELLED, RESPONSE_RSVP, RESPONSE_STANDING,
@@ -62,8 +65,8 @@ import {
 // are read-only views for the readers that have not moved (the earpiece, the
 // pinned board); nothing here reads or writes them.
 export const POST_COLUMNS = "id, class, title, body, author, household, place_mark, place_x, place_y, starts, ends, state, fields, revised, posted_act, last_act";
-const READ_HINT = (id) => `town { read: "calendar", args: { event: "${id}" } } — or GET /calendar/${id}`;
-const POST_READ_HINT = (id) => `town { read: "event", args: { post: "${id}" } } — or GET /calendar/${id}`;
+const READ_HINT = (id) => `town { read: "calendar", args: { event: "${id}" } } — or GET ${apiUrl(`/calendar/${id}`)}`;
+const POST_READ_HINT = (id) => `town { read: "event", args: { post: "${id}" } } — or GET ${apiUrl(`/calendar/${id}`)}`;
 
 const isRefusal = (e) => e && typeof e.code === "number" && typeof e.defect === "string";
 
@@ -378,6 +381,8 @@ function bodyOf(fields) {
  * path, which answers its own "no event", exactly as it did before they joined.
  */
 async function classOf(fields, id, env) {
+  // a report's id says its class (POS-757): report/<hex>, never a public row
+  if (String(fields.class ?? "").trim() === REPORT_CLASS || REPORT_ID_RE.test(id)) return REPORT_CLASS;
   const c = judgeClass(fields, { required: false, env });
   if (c) return c;
   const { ideaRow } = await ideaPen();
@@ -398,6 +403,7 @@ export async function postAtTown(fields, key, { now = Date.now(), env = process.
 export async function amendAtTown(fields, key, { now = Date.now(), env = process.env } = {}) {
   const id = postId(fields);
   const cls = await classOf(fields, id, env);
+  if (cls === REPORT_CLASS) throw REPORT_NO_AMEND();
   if (cls === QUEST_CLASS) throw QUEST_NO_AMEND();
   if (cls === BUG_CLASS) return amendBug(fields, key, id, { now, env });
   if (cls === IDEA_CLASS) return (await ideaPen()).amendIdea(fields, key, id, { now, env });
@@ -409,6 +415,7 @@ export async function amendAtTown(fields, key, { now = Date.now(), env = process
 export async function closeAtTown(fields, key, { now = Date.now(), env = process.env } = {}) {
   const id = postId(fields);
   const cls = await classOf(fields, id, env);
+  if (cls === REPORT_CLASS) throw REPORT_NO_CLOSE();
   if (cls === QUEST_CLASS) return closeQuest(fields, key, id, { now, env });
   if (cls === BUG_CLASS) throw BUG_NO_CLOSE(id);
   if (cls === IDEA_CLASS) throw refuse(422, `"${id}" is an idea, and an idea is not closed`,
@@ -427,6 +434,7 @@ export async function closeAtTown(fields, key, { now = Date.now(), env = process
 export async function advanceAtTown(fields, key, { now = Date.now(), env = process.env, roll = null } = {}) {
   const id = postId(fields);
   const cls = await classOf(fields, id, env);
+  if (cls === REPORT_CLASS) return (await import("./report-store.mjs")).advanceReport(fields, key, id, { now, env });
   if (cls === QUEST_CLASS) throw QUEST_NO_ADVANCE();
   if (cls === BUG_CLASS) return advanceBug(fields, key, id, { now, env, roll });
   // POS-713: skip and its reason are the bug's ladder; no other class reads them, so none takes them silently.
@@ -460,7 +468,7 @@ function questActRow({ action, object, payload, now }) {
   };
 }
 
-const questReadHint = (id) => `town { read: "posts", args: { class: "quest", post: "${id}" } } — or GET /posts/${id}`;
+const questReadHint = (id) => `town { read: "posts", args: { class: "quest", post: "${id}" } } — or GET ${apiUrl(`/posts/${id}`)}`;
 const questAnswer = (row) => ({ id: row.id, class: QUEST_CLASS, author: row.author, household: row.household ?? null, state: row.state, fields: row.fields });
 
 /** Put a registry quest up as the town's post: one `post` act, one `posts` row. */
@@ -554,7 +562,7 @@ function bugActRow({ action, actor, object, payload, now }) {
   };
 }
 
-const bugReadHint = (id) => `town { read: "posts", args: { class: "bug", post: "${id}" } } — or GET /posts/${id}?class=bug`;
+const bugReadHint = (id) => `town { read: "posts", args: { class: "bug", post: "${id}" } } — or GET ${apiUrl(`/posts/${id}?class=bug`)}`;
 const bugAnswer = (row) => ({ id: row.id, class: BUG_CLASS, title: row.title, body: row.body, author: row.author,
   household: row.household ?? null, state: row.state, fields: row.fields });
 
@@ -676,7 +684,7 @@ async function recreditBug(fields, key, id, { now, env, roll }) {
     await judgeEarnedCreditVia(client, r, gh);
     const payload = { post: id, to: r.to, was, credit: r.credit, link: r.link, note: r.note, paid: n, hand };
     const actId = await insertAct(client, bugActRow({ action: ACT_RECREDIT, actor: hand, object: id, payload, now }));
-    return { post: id, act_id: actId, hand, stage: r.to, recredit: true, was, credit: r.credit, stamps: n, link: r.link,
+    return { post: id, act_id: actId, hand, ...rungWords(r.to), recredit: true, was, credit: r.credit, stamps: n, link: r.link,
       receipt: `re-credited: ${id}'s ${r.to} from ${was} to ${r.credit} by ${hand}'s hand; ${r.to} points at ${r.link}. `
         + `The reviewed stage pass reads the town's ledger: it pays ${r.credit} what ${r.to}'s line paid ${was}${n ? ` (${n} stamps, by the office's chain)` : ""} (post:${id}/${r.to}-recredit) and burns that mint, together or not at all; this act moves no stamps. `
         + `If the ledger holds no such line paid to ${was}, or ${was} no longer holds its amount in liquid stamps, the pass holds the correction and says why.`,
@@ -716,7 +724,7 @@ async function advanceBug(fields, key, id, { now, env, roll }) {
     const pays = BUG_LADDER[j.to]
       ? `the ladder owes ${j.credit} ${n} stamps for ${j.to}, paid by the reviewed stage pass (not by this act), subject to the town's meep law and, at confirmed, three paid reports per household a week`
       : `${j.to} pays nothing`;
-    return { post: bugAnswer(row), act_id: actId, hand, stage: j.to, ...(j.credit ? { credit: j.credit } : {}), stamps: n,
+    return { post: bugAnswer(row), act_id: actId, hand, ...rungWords(j.to), ...(j.credit ? { credit: j.credit } : {}), stamps: n,
       ...(j.critter ? { critter: j.critter } : {}), ...(j.link ? { link: j.link } : {}),
       receipt: `advanced: ${id} ${prev.state} → ${j.to} by ${hand}'s hand; ${pays}${j.critter ? `; its critter is "${j.critter}", named by ${j.credit}` : ""}${j.link ? `; ${j.to} points at ${j.link}` : ""}`,
       read: bugReadHint(id) };
@@ -740,7 +748,7 @@ async function skipBug(fields, key, id, { now, env }) {
       { id: actId, action: ACT_SKIP, actor: hand, object: id, payload, household: prev.household });
     await updatePost(client, row);
     const next = BUG_STAGES[BUG_STAGES.indexOf(s.to) + 1];
-    return { post: bugAnswer(row), act_id: actId, hand, stage: s.to, skipped: true, reason: s.reason, stamps: 0,
+    return { post: bugAnswer(row), act_id: actId, hand, ...rungWords(s.to), skipped: true, reason: s.reason, stamps: 0,
       receipt: `skipped: ${id} ${prev.state} → ${s.to} by ${hand}'s hand, because ${s.reason}; a skipped stage credits no one and pays nothing, and the bug's history keeps it as skipped. Next: ${next}`,
       read: bugReadHint(id) };
   }, env);
@@ -756,7 +764,14 @@ export async function revealAtTown(fields, key, { now = Date.now(), env = proces
   if (!id) throw refuse(422, "which bug?", 'post: "<author>/<slug>" — town { read: "posts", args: { class: "bug" } } lists them', { field: "post" });
   if (fields.class !== undefined && fields.class !== BUG_CLASS)
     throw refuse(422, "a reveal is a bug's", 'only a bug post reveals a critter; send class "bug" or leave class off', { field: "class" });
-  const { mediaUrlOk } = await import("./media.mjs");
+  const { mediaUrlOk, mediaHeldRefusal } = await import("./media.mjs");
+  // Each candidate is a picture the town holds (POS-738), asked before the
+  // write. A malformed one is left to judgeReveal's own refusal.
+  for (const u of Array.isArray(fields?.candidates) ? fields.candidates : []) {
+    if (typeof u !== "string" || !mediaUrlOk(u.trim())) continue;
+    const held = await mediaHeldRefusal(u.trim());
+    if (held) throw refuse(held.code, held.defect, held.hint, { field: "candidates" });
+  }
   return write(async (client) => {
     const prev = await bugRow(client, id);
     if (!prev) throw refuse(404, `no bug "${id}"`, 'town { read: "posts", args: { class: "bug" } } lists them');

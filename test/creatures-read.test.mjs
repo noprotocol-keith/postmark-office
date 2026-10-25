@@ -60,7 +60,7 @@ test("who: a living creature within presence's radius, nearest first, in the eng
     spawn("creature:wolf-270-3", { x: 900, y: 0 }), react("creature:wolf-270-2", { reaction: "snarl", at: NOW - 120_000 }));
   const rows = creaturesInWho(cur, { x: 0, y: 0 }, { nowMs: NOW, engine: ENGINE });
   assert.deepEqual(rows.map((r) => r.id), ["creature:wolf-270-2", "creature:wolf-270-1"], "the one 900 m off is past presence's 500 m");
-  assert.deepEqual(rows[0], { kind: "creature", id: "creature:wolf-270-2", name: "a grey wolf", m: 120, bearing: ENGINE.quantizeBearing(ENGINE.bearingDeg(0, 120)),
+  assert.deepEqual(rows[0], { kind: "creature", id: "creature:wolf-270-2", name: "a grey wolf", ring_m: 80, m: 120, bearing: ENGINE.quantizeBearing(ENGINE.bearingDeg(0, 120)),
     band: ENGINE.distanceBand(120), doing: "it bares its teeth, a warning only", last: "answered kai, 2 min ago" });
   assert.equal(rows[1].doing, "out of the Mists", "a creature that has answered nobody yet");
   assert.equal(rows[1].last, undefined);
@@ -175,7 +175,10 @@ test("find: a kind, its name or \"creature\" names the living creatures, nearest
   }
   const [h] = findCreatures(cur, "wolf", { x: 0, y: 0 }, { nowMs: NOW, engine: ENGINE });
   assert.deepEqual(h, { id: "creature:wolf-270-2", kind: "wolf", name: "a grey wolf", at: { x: 0, y: -700 }, distance_m: 700,
-    bearing: ENGINE.quantizeBearing(ENGINE.bearingDeg(0, -700)), fades_in: "never" });
+    bearing: ENGINE.quantizeBearing(ENGINE.bearingDeg(0, -700)), fades_in: "never", ring_m: 80 });
+  // WLD-82 part 1 of 2: every row the page reads carries its kind's ring, the number inRing judges by
+  // ⚑ THE FLIP: drop `...ringOf(…)` from findCreatures' row → this reds
+  assert.ok(findCreatures(cur, "creature", { x: 0, y: 0 }, { nowMs: NOW, engine: ENGINE }).every((r) => r.ring_m === 80), "ring_m on every find row");
   assert.equal(findCreatures(cur, "snug", { x: 0, y: 0 }, { nowMs: NOW }), null, "a find for a mark names no creature");
 });
 
@@ -344,6 +347,24 @@ test("investigate: the creature as of now, its newest reactions with their odds 
   const blind = await investigateCreature(W, { creatures: cur, nowMs: NOW, rows: async () => null });
   assert.match(blind.reactions.unavailable, /could not be read/);
   assert.equal(blind.presence.last_crossing.unavailable, "no crossing save holds this creature");
+});
+
+test("investigate: what a creature did is served from the acts, so a creature out of the fold still shows its history (POS-781)", async () => {
+  const GONE = "creature:wolf-270-5";
+  // fled: the fold holds no live row, no save holds it, but its reactions are on the record
+  const cur = fold(spawn(GONE), react(GONE, { to: "kai" }), withdraw(GONE));
+  const rows = async () => [{ id: "78", at: new Date(NOW - 120_000), object: "9002",
+    payload: { to: "kai", verb: "approach", reaction: "snarl", roll: 15, judged_by: "code", allowed: { watch: 0.5, snarl: 0.5 } } }];
+  const r = await investigateCreature(GONE, { creatures: { living: new LivingSet({ law: LAW }).fold([]), law: LAW }, nowMs: NOW, rows });
+  assert.equal(r.kind, "creature", "a creature with a record is not 'no creature': " + JSON.stringify(r).slice(0, 200));
+  assert.equal(r.name, "a grey wolf", "its kind is the one its id names");
+  assert.match(r.presence.now.unavailable, /no longer held/);
+  assert.deepEqual([r.reactions.rows[0].to, r.reactions.rows[0].verb, r.reactions.rows[0].reaction], ["kai", "approach", "snarl"]);
+  assert.equal(r.reactions.rows[0].line, "The wolf's lip curls back. It snarls at kai, low and steady.", "the line is read off the kind's law, not the fold's row");
+  assert.ok(cur.living, "(the fled fixture folds)");
+  // no fold row, no save and no record: still 404
+  assert.equal((await investigateCreature(GONE, { creatures: { living: new LivingSet({ law: LAW }).fold([]), law: LAW }, nowMs: NOW, rows: async () => [] })).code, 404);
+  // ⚑ THE FLIP: return the 404 on "no fold row and no save" alone → the first assert reds.
 });
 
 nodeTest("the crossing save's tier: STATE/snapshot/<newest>/creatures.json, as the world's creaturesSnapshot writes it", () => {

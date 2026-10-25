@@ -46,6 +46,7 @@ import {
   BODY_MAX as IDEA_BODY_MAX,
 } from "./ideas.mjs";
 import { signUpAtTown, answerSignUpAtTown, awardAtTown } from "./idea-store.mjs";
+import { REPORT_CLASS } from "./reports.mjs"; // POS-757: the private post class; its pen is report-store.mjs
 
 const PLACE = { type: "object", description: "where it happens: { mark: \"<owner>/<slug>\" } (a standing mark with an extent) or { at: { x, y } } (absolute world coordinates)" };
 
@@ -114,6 +115,9 @@ function strays(args, fields, lane, takes) {
  */
 export async function townPostEvent(args = {}, key = null, { roll = null, env = process.env } = {}) {
   const c = String(args.class ?? "").trim();
+  // A REPORT (POS-757) is private, so it has its own pen and never the post
+  // machine's public rows; its fields are judged there (reports.mjs § judgeReport).
+  if (c === REPORT_CLASS) return answer(async () => (await import("./report-store.mjs")).postReport(args, key, { roll, env }));
   if (c === IDEA_CLASS) {
     if (!ideaPostsOn(env)) return null;   // the switch off: the idea lane, exactly as before
     if (args.stamps !== undefined)
@@ -167,8 +171,8 @@ const ifIdeas = (s) => (IDEAS_ON ? s : "");
 const ACTING_HANDLE = { type: "string", description: "which of your residents acts (omit if your key holds one) — for an event, one of its household; for a quest or a bug, one of the town's hands" };
 const POST_REF = { type: "string", description: "the post's id, <author>/<slug>, as town { read: \"posts\" } names it" };
 const CLASS_REF = IDEAS_ON
-  ? { type: "string", enum: [EVENT_CLASS, QUEST_CLASS, BUG_CLASS, IDEA_CLASS], description: "optional — the post's class; when sent it must be the post's own (\"event\", \"quest\", \"bug\" or \"idea\")" }
-  : { type: "string", enum: [EVENT_CLASS, QUEST_CLASS, BUG_CLASS], description: "optional — the post's class; when sent it must be the post's own (\"event\", \"quest\" or \"bug\")" };
+  ? { type: "string", enum: [EVENT_CLASS, QUEST_CLASS, BUG_CLASS, IDEA_CLASS, REPORT_CLASS], description: "optional — the post's class; when sent it must be the post's own (\"event\", \"quest\", \"bug\", \"idea\" or \"report\")" }
+  : { type: "string", enum: [EVENT_CLASS, QUEST_CLASS, BUG_CLASS, REPORT_CLASS], description: "optional — the post's class; when sent it must be the post's own (\"event\", \"quest\", \"bug\" or \"report\")" };
 
 export const TOWN_POST_TOOLS = [
   { name: "town_amend",
@@ -185,7 +189,7 @@ export const TOWN_POST_TOOLS = [
       post: POST_REF, class: CLASS_REF, handle: ACTING_HANDLE,
     }, required: ["post"], additionalProperties: false } },
   { name: "town_advance",
-    description: `Move a post along its class's lifecycle — town { do: "advance" }'s flat charge name. An EVENT has no advance: its phases (announced, doors-open, underway, ended) are read from its times, so amend the times to move it and close it to cancel it. A QUEST has none either: it is open until the town closes it. A BUG advances, by the town's hands only (${BUG_HANDS.join(", ")}): ${BUG_STAGES.join(" → ")}, or from reported or confirmed to ${BUG_SIDE_EXITS.join(" or ")}. Every rung is recorded, in order: an advance moves one stage on, and a stage no one earned is skipped, { post, skip: "<stage>", reason }, one per call, crediting no one and paying nothing; a jump is refused and names the stage to record or skip first. Each paid stage names whom it credits (credit; at confirmed it defaults to the reporter), briefed takes a grade and fixed a size plus a critter (the name the fixer chose for the bug's critter: the resident who fixes a bug names it), diagnosed, briefed and fixed each need link, and their credit must be its author (${LINK_WHAT}, or, at diagnosed or briefed, a letter's id or the resident's own PR (never a founder's); the post keeps one per stage in fields.links), and the stamps are paid by a reviewed pass, never by the advance itself. A stage paid to the wrong resident is re-credited by wright or keemin (recredit: true, below), never re-advanced.${ifIdeas(` An IDEA moves by the town's hands (${IDEA_HANDS.join(", ")}) to any named stage, in any order: ${IDEA_STAGES.join(", ")}. Each move may carry credit (the resident it credits), link and note; duplicate names of. Nothing gates a stage and nothing mints: stamps on an idea are awarded by hand (town { do: "award" }). A finished idea (${IDEA_FINISHED.join(", ")}) moves no further.`)} Each class's lifecycle is law, declared class by class.`,
+    description: `Move a post along its class's lifecycle — town { do: "advance" }'s flat charge name. THE WORD IS STATE: "to" names the state the post moves to, and the answer carries both "state" and "stage" — stage is a permanent alias of state, never removed. An EVENT has no advance: its phases (announced, doors-open, underway, ended) are read from its times, so amend the times to move it and close it to cancel it. A QUEST has none either: it is open until the town closes it. A BUG advances, by the town's hands only (${BUG_HANDS.join(", ")}): ${BUG_STAGES.join(" → ")}, or from reported or confirmed to ${BUG_SIDE_EXITS.join(" or ")}. Every rung is recorded, in order: an advance moves one stage on, and a stage no one earned is skipped, { post, skip: "<state>", reason }, one per call, crediting no one and paying nothing; a jump is refused and names the stage to record or skip first. Each paid state names whom it credits (credit; at confirmed it defaults to the reporter), briefed takes a grade and fixed a size plus a critter (the name the fixer chose for the bug's critter: the resident who fixes a bug names it), diagnosed, briefed and fixed each need link, and their credit must be its author (${LINK_WHAT}, or, at diagnosed or briefed, a letter's id or the resident's own PR (never a founder's); the post keeps one per stage in fields.links), and the stamps are paid by a reviewed pass, never by the advance itself. A stage paid to the wrong resident is re-credited by wright or keemin (recredit: true, below), never re-advanced.${ifIdeas(` An IDEA moves by the town's hands (${IDEA_HANDS.join(", ")}) to any named stage, in any order: ${IDEA_STAGES.join(", ")}. Each move may carry credit (the resident it credits), link and note; duplicate names of. Nothing gates a stage and nothing mints: stamps on an idea are awarded by hand (town { do: "award" }). A finished idea (${IDEA_FINISHED.join(", ")}) moves no further.`)} Each class's lifecycle is law, declared class by class.`,
     inputSchema: { type: "object", properties: {
       post: POST_REF, class: CLASS_REF, handle: ACTING_HANDLE,
       to: { type: "string", description: "the state to move it to, as its class's law names it" },
@@ -196,7 +200,7 @@ export const TOWN_POST_TOOLS = [
       of: { type: "string", description: "class \"bug\", to: \"duplicate\" only — the bug post it duplicates, <author>/<slug>" + ifIdeas("; class \"idea\", to: \"duplicate\" only — the idea post or Think Tank mark it repeats") },
       link: { type: "string", description: `class "bug", required at diagnosed, briefed and fixed, whose credit is its author — ${LINK_WHAT}, or, at diagnosed or briefed, a letter's id or the resident's own PR (never a founder's); at most ${LINK_MAX} characters${ifIdeas("; class \"idea\", optional — the Discussion, blueprint, PR or tag this stage points at, on github.com/postmark-town/")}` },
       recredit: { type: "boolean", description: `class "bug", wright or keemin only — true re-credits a stage already paid to the wrong resident: to names that stage (diagnosed, briefed or fixed), credit the resident whose work earned it, link that work, note why. Once per stage; the reviewed pass pays the new credit what the stage paid and burns the wrong mint, together` },
-      skip: { type: "string", description: `class "bug" only, in place of to — the next stage (${SKIP_STAGES.join(", ")}), recorded as skipped because no one earned it: one stage per call, in order, with reason; it credits no one and pays nothing, and shipped is never skipped` },
+      skip: { type: "string", description: `class "bug" only, in place of to — the next state (${SKIP_STAGES.join(", ")}), recorded as skipped because no one earned it: one stage per call, in order, with reason; it credits no one and pays nothing, and shipped is never skipped` },
       reason: { type: "string", description: `class "bug", with skip only, and required there — why no one earned the stage, at most ${SKIP_REASON_MAX} characters; it stays on the bug's history` },
       note: { type: "string", description: `class "bug", with recredit only, and required there — why the stage's credit was wrong, at most ${NOTE_MAX} characters${ifIdeas(`; class "idea", optional — a few words on why it moved, at most ${NOTE_MAX} characters`)}` },
     }, required: ["post"], additionalProperties: false } },

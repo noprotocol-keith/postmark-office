@@ -78,6 +78,7 @@ import {
   actsHaveNonce,
   markCentreOf, // POS-632 PR-3: the live lines are placed by their anchors, as the save places them
   heardAt, // POS-632 W4: the shared ear, no listen mark
+  roomOfNow, // WLD-74: the dungeon room a resident is entered in
   markRows, // POS-632: marks shown with their whole bodies (Darko 22:33)
   placeMarksAt, // POS-632: the marks place words name, as rows (v2 you.near; PR-4 every place line)
   engineDescend, // WLD-83 P10: the engine's one descent, for an appearance tree
@@ -2979,7 +2980,10 @@ async function apexRead(args, key, ctx = {}) {
       const { isMainThread } = await import("node:worker_threads");
       if (isMainThread || ctx.earshot) {
         heard = await heardAt({ x: answer.standpoint?.x, y: answer.standpoint?.y },
-          { cap: 3, exclude: oriented.standpoint?.stance === "embodied" ? standingHandle(args, key) : null, ...(ctx.earshot ? { snapshot: ctx.earshot } : {}) });
+          { cap: 3, exclude: oriented.standpoint?.stance === "embodied" ? standingHandle(args, key) : null,
+            // WLD-74: the ear is in the room they entered (null in the open): hearing stops at a dungeon room's walls
+            room: oriented.standpoint?.stance === "embodied" ? await roomOfNow(standingHandle(args, key)) : null,
+            ...(ctx.earshot ? { snapshot: ctx.earshot } : {}) });
       }
     } catch { heard = null; }
     // The marks this read names beyond the view, each with its whole body, read

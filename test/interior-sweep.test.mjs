@@ -239,8 +239,7 @@ test("keyless walks and occupancy name no room: a walk's target, its ledger line
   const walks = await world2Serve("/world2/walks", new URLSearchParams(""), { p });
   assert.equal(walks.code, 200, JSON.stringify(walks.body).slice(0, 300));
   assert.deepEqual(leaks(walks.body), [], "/world2/walks");
-  const mine = walks.body.walks.find((w) => w.handle === "ann");
-  assert.equal(mine.to, null);
+  assert.ok(!walks.body.walks.some((w) => w.handle === "ann"), "ann entered the great room, so her walk is not on a keyless read at all (and so neither is its target)");
   assert.equal(walks.body.walks.find((w) => w.handle === "bo").to, "townsfolk/a-bench", "an open-ground target is untouched");
   const occ = await world2Serve("/world2/occupancy", new URLSearchParams(""), { p });
   assert.equal(occ.code, 200, JSON.stringify(occ.body).slice(0, 300));
@@ -357,4 +356,113 @@ test("the keyless routes themselves: /world2/present, /world2/positions and the 
   const apexed = await world2Apex(new URLSearchParams({ x: String(HALL_AT.x), y: String(HALL_AT.y), crossing: "1" }), { p });
   assert.ok(!apexed.error, JSON.stringify(apexed.error?.body));
   assert.deepEqual(handlesOf(apexed.body.present?.residents), ["bo", "cy"], "the apex's present at the room's own spot");
+});
+
+// ── hearing stops at a dungeon room's walls, both ways ───────────────────────
+
+test("one say traced end to end: spoken inside a room it is heard only in that room, its record and its log line say so, an outside say is not heard inside", async () => {
+  const { mkdtempSync, readFileSync: readF } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { createVoices, EARSHOT_M } = await import("../src/voices.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "postmark-interior-say-"));
+  const T0 = Date.UTC(2026, 9, 26, 17, 0, 0);
+  const clock = { t: T0 };
+  const where = { ann: { x: 2000, y: 2000 }, cy: { x: 2001, y: 2000 }, bo: { x: 2000, y: 2001 } }; // all at the same spot: bo only stands on it
+  const roomOf = { ann: HALL, cy: HALL, bo: null };
+  const make = (logPath) => createVoices({
+    standpoint: async (h) => ({ handle: h, placed: true, x: where[h].x, y: where[h].y, aboard: false, moving: false }),
+    place: async () => "the spot", logPath, now: () => clock.t,
+    hearingWindow: () => ({ since: T0 - 3_600_000, source: "bench", disclosure: null }),
+    roomOf: async (h) => roomOf[h] ?? null,
+    // the presence layer's answer, with the world's rule: only those in the voice's own room (null: the open) are within earshot
+    nearby: async (point, { room = null } = {}) => Object.keys(where).filter((h) => (roomOf[h] ?? null) === (room ?? null)
+      && Math.hypot(where[h].x - point.x, where[h].y - point.y) <= EARSHOT_M).sort(),
+  });
+  const log = join(dir, "voices.jsonl");
+  const v = make(log);
+  const said = await v.say("ann", "the secret of the room");
+  assert.ok(!said.error, JSON.stringify(said).slice(0, 200));
+  assert.deepEqual(said.listeners, ["cy"], "the speaker's reply: only the one in the same room is a listener, bo (on the spot outside) is not");
+  clock.t += 20_000;
+  const outsider = await v.hear("bo", {});
+  assert.deepEqual(outsider.voices, [], "bo, standing on the spot outside the room, hears nothing");
+  assert.ok(!JSON.stringify(outsider).includes("secret"), "nor reads it in the room's record");
+  assert.deepEqual(outsider.listeners, [], "and ann is not a listener to bo");
+  const mate = await v.hear("cy", {});
+  assert.deepEqual(mate.voices.map((x) => x.said), ["the secret of the room"], "cy, in the room, hears it");
+  assert.deepEqual(mate.listeners, ["ann"]);
+  // the log line carries the room, so a restart keeps it
+  assert.equal(JSON.parse(readF(log, "utf8").trim().split("\n")[0]).room, HALL);
+  const reborn = make(log);
+  assert.deepEqual((await reborn.hear("bo", {})).voices, [], "after a restart too");
+  assert.equal((await reborn.hear("cy", {})).voices.length, 1);
+  // the page's record (keyless) has no such voice
+  assert.deepEqual([...reborn.conversations().live, ...reborn.conversations().closed], [], "the conversations page lists nothing of it");
+  // an outside say is not heard inside
+  clock.t += 20_000;
+  await reborn.say("bo", "hello from the spot");
+  clock.t += 20_000;
+  const inside = await reborn.hear("cy", {});
+  assert.ok(!JSON.stringify(inside).includes("hello from the spot"), "a say made outside is not heard inside the room");
+  const listed = reborn.conversations();
+  assert.equal([...listed.live, ...listed.closed].flatMap((c) => c.record ?? c.voices ?? []).length > 0, true, "the outside say is on the page");
+  assert.ok(!JSON.stringify(listed).includes("secret"));
+});
+
+test("the keyless store says and conversations leave out a say spoken inside a room", async (t) => {
+  if (WHY) return t.skip(WHY);
+  const { spokenInRoom } = await import("../src/world2-serve.mjs");
+  assert.equal(spokenInRoom({ payload: { text: "x", room: HALL } }), true);
+  assert.equal(spokenInRoom({ payload: JSON.stringify({ text: "x", room: HALL }) }), true);
+  assert.equal(spokenInRoom({ payload: { text: "x" } }), false);
+  const say = (id, text, room) => ({ id, at: new Date("2026-10-26T17:00:00Z"), crossing: "300", actor: "ann", action: "say", at_anchor: null, at_dx: 2000, at_dy: 2000,
+    payload: { text, place: "the spot", ...(room ? { room } : {}) }, class: "voice" });
+  const p = { query: async (sql, args) => {
+    if (/FROM acts/i.test(sql)) return { rows: [say(1, "an open word"), say(2, "the secret of the room", HALL)] };
+    return pool().query(sql, args);
+  } };
+  const conv = await world2Serve("/world2/conversations", new URLSearchParams(""), { p });
+  assert.ok(conv.code === 200 || conv.code === 500, JSON.stringify(conv.body).slice(0, 200));
+  assert.ok(!JSON.stringify(conv.body).includes("secret of the room"), "/world2/conversations");
+  const air = await world2Serve("/world2/say", new URLSearchParams(""), { p });
+  assert.ok(!JSON.stringify(air.body).includes("secret of the room"), "/world2/say");
+});
+
+test("the world's wiring: say listeners, the witness stamp and the ears all ask the room, and a walk row of an insider is not on /world2/walks", async () => {
+  const { readFileSync: readF } = await import("node:fs");
+  const src = readF(new URL("../src/world.mjs", import.meta.url), "utf8");
+  assert.match(src, /const voices = createVoices\(\{\s*roomOf: roomOfNow/, "the voices know whose room a speaker and an ear are in");
+  assert.match(src, /export async function projectedNearby\(at, \{ room = null \} = \{\}\) \{\s*const hide = await hearersHiddenFrom\(room\)/, "the say's listeners by position");
+  assert.match(src, /hide: await hearersHiddenFrom\(await roomOfNow\(handle\)\)/, "the witness stamp");
+  assert.match(src, /\.filter\(\(r\) => !of \|\| of\(r\.handle\) === \(room \?\? null\)\)/, "the push's listeners");
+  if (WHY) return;
+  const walk = (id, handle) => ({ id, at: new Date("2026-10-26T16:40:00Z"), crossing: "300", actor: handle, action: "walk", payload: { from: { x: 2000, y: 2000 }, toward: { x: 2000, y: 2000 }, within: null, to: null, pace: 60 } });
+  const enter = (id, handle, mark, act) => ({ id, at: new Date("2026-10-26T16:30:00Z"), crossing: null, actor: handle, action: act === "enters" ? "legacy:enter" : "legacy:exit",
+    payload: { _ledger: "WORLD/enter-exit-ledger.md", iso: "2026-10-26T16:30:00.000Z", handle, act, mark, at: 1, word: "neutral" } });
+  const p = { query: async (sql, args) => {
+    if (/FROM acts/i.test(sql)) return { rows: (args?.[0] ?? []).includes("legacy:enter") ? [enter(10, "ann", KEEP, "enters"), enter(11, "ann", HALL, "enters")] : [walk(1, "ann"), walk(2, "bo")] };
+    return pool().query(sql, args);
+  } };
+  const walks = await world2Serve("/world2/walks", new URLSearchParams(""), { p });
+  assert.equal(walks.code, 200, JSON.stringify(walks.body).slice(0, 200));
+  assert.deepEqual(walks.body.walks.map((w) => w.handle), ["bo"], "ann, entered in the great room, has no walk here, and no coordinates");
+});
+
+test("the enter ledger is folded once a second, not once a call, and an enter or exit forgets it at once", async () => {
+  const { occupancyAll, folds, forgetOccupancy, OCCUPANCY_TTL_MS, __setOccupancyReaderForTest } = await import("../src/creature-sight.mjs");
+  __setOccupancyForTest(null);
+  __setOccupancyReaderForTest(async () => { await new Promise((r) => setTimeout(r, 30)); return new Map([["ann", [HALL]]]); });
+  forgetOccupancy();
+  const before = folds.n;
+  await Promise.all([occupancyAll(), occupancyAll(), occupancyAll(), occupancyAll()]);
+  await occupancyAll();
+  assert.equal(folds.n - before, 1, "nine callers in one read share one fold");
+  assert.equal(OCCUPANCY_TTL_MS, 1000);
+  forgetOccupancy();
+  await occupancyAll();
+  assert.equal(folds.n - before, 2, "forgotten at once by a passage");
+  __setOccupancyReaderForTest(null); forgetOccupancy();
+  const crossings = (await import("node:fs")).readFileSync(new URL("../src/world-crossings.mjs", import.meta.url), "utf8");
+  assert.match(crossings, /enterAct\(worldClone, payload, key, deps\)\.finally\(forgetOccupancy\)/);
+  assert.match(crossings, /exitAct\(worldClone, payload, key, deps\)\.finally\(forgetOccupancy\)/);
 });

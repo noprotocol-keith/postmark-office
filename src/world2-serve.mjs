@@ -699,13 +699,19 @@ export async function interiorSlugs(p, eng = null, markRows = null) {
  * THE RESIDENTS A KEYLESS READER MAY NOT SEE (WLD-74): those entered in a room inside a dungeon, from the enter record (the same passage fold
  * /world2/occupancy serves). Dungeons only; empty where the world has none, and the ledger is read only when it has one.
  */
-export async function insiderHandles(p, eng = null, markRows = null) {
-  const inside = await interiorSlugs(p, eng, markRows);
+export async function insiderHandles(p, eng = null, markRows = null, known = null) {
+  const inside = known ?? await interiorSlugs(p, eng, markRows);
   if (!inside.size) return new Set();
   const { rows } = await p.query(`SELECT id, at, crossing, actor, action, payload FROM acts WHERE action = ANY($1) ${live.PASSAGE_ORDER_SQL}`, [live.PASSAGE_ACTIONS]);
   const occ = live.occupancyAt(live.passageRecords(rows).passages, live.fractionalCrossing(Date.now()));
   return new Set([...occ].filter(([, stack]) => stack.some((m) => inside.has(m))).map(([h]) => h));
 }
+/** A say act spoken inside a dungeon room (its payload carries the room): shown only to readers in that room, so never on a keyless route (WLD-74). */
+export const spokenInRoom = (row) => {
+  let p = row?.payload;
+  if (typeof p === "string") { try { p = JSON.parse(p); } catch { p = null; } }
+  return !!(p?.room ?? p?.payload?.room);
+};
 const interiorBounce = (hint) => ({ code: 503, body: { error: "bounce", defect: "the marks cannot be sorted into inside and outside just now", hint } });
 
 export async function world2Serve(path, searchParams, { p: injected = null, hearingWindow = hearingWindowAt, eng: injectedEngine = null } = {}) {
@@ -748,13 +754,16 @@ export async function world2Serve(path, searchParams, { p: injected = null, hear
     const cols = full
       ? "slug, kind, owner, household, geometry, bbox, status, locked_window, parent, body, data"
       : "slug, kind, owner, household, geometry, status, locked_window, parent";
+    // ONE READ composes the list and the sorting of inside from outside (WLD-74): the same rows carry the id, body and data the sight function needs,
+    // and the listing drops them again when it was not asked for them
     const { rows: every } = await p.query(
-      `SELECT ${cols}
+      `SELECT id::text AS _id, ${cols}${full ? "" : ", body, data"}
        FROM marks WHERE status = 'standing' ${all ? "" : "AND geometry IS NOT NULL"}
        ORDER BY slug`);
     let inside;
-    try { inside = await interiorSlugs(p, injectedEngine); } catch (e) { return interiorBounce(faultLogged("the interior marks cannot be told from the rest", e)); }
-    const rows = every.filter((r) => !inside.has(r.slug)); // nothing inside a dungeon is listed to one who has entered nothing
+    try { inside = await interiorSlugs(p, injectedEngine, every.map(({ _id, ...row }) => ({ ...row, id: _id ?? row.id }))); } catch (e) { return interiorBounce(faultLogged("the interior marks cannot be told from the rest", e)); }
+    const rows = every.filter((row) => !inside.has(row.slug)) // nothing inside a dungeon is listed to one who has entered nothing
+      .map(({ _id, ...row }) => { if (full) return row; const { body, data, ...listed } = row; return listed; });
     return { code: 200, body: {
       what: (all ? "the whole standing register (de-sited included — a predicated mark is its parent continued)"
                  : "placed standing marks (every row has a where); ?all=true for the whole register")
@@ -1062,7 +1071,9 @@ export async function world2Serve(path, searchParams, { p: injected = null, hear
     // ledger line (which names it) is rendered again without it
     let inside;
     try { inside = await interiorSlugs(p, injectedEngine); } catch (e) { return interiorBounce(faultLogged("the interior marks cannot be told from the rest", e)); }
-    const all = derived.records.map((d0) => {
+    let insiders;
+    try { insiders = await insiderHandles(p, injectedEngine, null, inside); } catch (e) { return interiorBounce(faultLogged("the residents inside a dungeon cannot be told from the rest", e)); }
+    const all = derived.records.filter((d0) => !insiders.has(d0.handle)).map((d0) => { // WLD-74: a resident inside a dungeon room has no walk on a keyless read
       const d = inside.has(d0.targetMarkId) ? { ...d0, targetMarkId: null, targetExtent: null, line: null } : d0;
       return ({
       iso: d.iso, handle: d.handle,
@@ -1133,7 +1144,7 @@ export async function world2Serve(path, searchParams, { p: injected = null, hear
       count: Object.keys(derived.records.length ? live.positionsAt(derived.records, fc) : {}).length,
       walkers: await (async () => { // WLD-74: a walker's target mark is named only if it is not inside a dungeon
         let inside, insiders;
-        try { inside = await interiorSlugs(p, injectedEngine); insiders = await insiderHandles(p, injectedEngine); } catch { inside = null; insiders = null; }
+        try { inside = await interiorSlugs(p, injectedEngine); insiders = await insiderHandles(p, injectedEngine, null, inside); } catch { inside = null; insiders = null; }
         const w = await import("./world.mjs");
         return w.hideInteriorTargets(live.publicWalkers(derived.records, fc), inside).filter((r) => insiders != null && !insiders.has(r.handle));
       })(),
@@ -1253,10 +1264,11 @@ export async function world2Serve(path, searchParams, { p: injected = null, hear
     // an index range that holds every act at or after the lookback, and
     // `at >= ` is then the exact cut.
     const readFrom = at.ms - SAY_LOOKBACK_MS;
-    const [{ rows: voiceRows }, { rows: markRows }] = await Promise.all([
+    const [{ rows: voiceRows0 }, { rows: markRows }] = await Promise.all([
       p.query(SAY_READ_SQL, [talk.VOICE_ACTIONS, currentCrossing(readFrom) - 1, new Date(readFrom).toISOString()]),
       p.query(talk.ANCHOR_MARKS_SQL),
     ]);
+    const voiceRows = voiceRows0.filter((row) => !spokenInRoom(row)); // WLD-74: a say spoken inside a dungeon room is not on a keyless read
     const centres = talk.anchorCentres(markRows);
     const dials = talk.sayDials(markRows.filter((m) => m.status === "standing"));
     const air = talk.sayActsAsEmissions(voiceRows, { centreOf: (id) => centres.get(id) ?? null,
@@ -1318,11 +1330,12 @@ export async function world2Serve(path, searchParams, { p: injected = null, hear
     const at = clockOf(searchParams);
     if (at.error) return at.error;
     const n = (k, d) => { const v = Number(searchParams?.get(k)); return Number.isFinite(v) && v > 0 ? v : d; };
-    const [{ rows }, { rows: markRows }] = await Promise.all([
+    const [{ rows: allVoices }, { rows: markRows }] = await Promise.all([
       p.query(`SELECT id, at, actor, action, at_anchor, at_dx, at_dy, payload FROM acts
                 WHERE action = ANY($1) ${talk.VOICE_ORDER_SQL}`, [talk.VOICE_ACTIONS]),
       p.query(talk.ANCHOR_MARKS_SQL),
     ]);
+    const rows = allVoices.filter((row) => !spokenInRoom(row)); // WLD-74: a say spoken inside a dungeon room is not on a keyless read
     const centres = talk.anchorCentres(markRows);
     const dials = talk.sayDials(markRows.filter((m) => m.status === "standing"));
     let derived;

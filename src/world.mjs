@@ -752,15 +752,16 @@ export async function projectedNear(point, radiusM, atMs = Date.now()) {
  * `near()`. Same gate (WORLD_PRESENCE), same radius, same cap, same sorted
  * handles. Flag off, it is the hook `voices` is built with, call for call.
  */
-export async function projectedNearby(at) {
+export async function projectedNearby(at, { room = null } = {}) {
+  const hide = await hearersHiddenFrom(room); // WLD-74: only those in the voice's own room (the open, for a voice in none)
   if (!positionsProjected()) {
-    const r = await presentNear(at, { radiusM: EARSHOT_M, limit: EARSHOT_PRESENCE_CAP, repo: WORLD_CLONE, world: await foldForPresence() });
+    const r = await presentNear(at, { radiusM: EARSHOT_M, limit: EARSHOT_PRESENCE_CAP, repo: WORLD_CLONE, world: await foldForPresence(), hide });
     if (!r || r.unavailable || !Array.isArray(r.residents)) return null;
     return r.residents.map((p) => p.handle).sort();
   }
   if (!presenceEnabled()) return null;
   try {
-    const hits = await projectedNear(at, EARSHOT_M);
+    const hits = (await projectedNear(at, EARSHOT_M)).filter((r) => !hide?.(r.handle));
     return hits.slice(0, EARSHOT_PRESENCE_CAP).map((r) => r.handle).sort();
   } catch (e) {
     console.error(`[world] the projected presence read tripped (${String(e?.message ?? e).slice(0, 160)}) — the door answers without it`);
@@ -1127,14 +1128,37 @@ const determinedOf = (w) => w?._raw?.worldState?.determined ?? null;
  * The marks nobody outside a dungeon may name (WLD-74): what the one sight function (standpointSight, no occupancy) leaves out of the
  * published world. Null when the world cannot be read, which callers treat as "name nothing".
  */
+const _interiorOf = new WeakMap(); // the published world object -> its interior ids (one sort per fold, not per read)
 export async function interiorIdsNow() {
   try {
     const w = await world();
+    const kept = _interiorOf.get(w);
+    if (kept) return kept;
     const { verbs } = await mods();
     if (typeof verbs?.standpointSight !== "function") return new Set();
     const seen = new Set(verbs.standpointSight(w, {}).marks.map((m) => m.id));
-    return new Set((w.marks ?? []).filter((m) => !seen.has(m.id)).map((m) => m.id));
+    const out = new Set((w.marks ?? []).filter((m) => !seen.has(m.id)).map((m) => m.id));
+    _interiorOf.set(w, out);
+    return out;
   } catch { return null; }
+}
+
+/** The dungeon room a resident is entered in now (the innermost interior mark of their stack), or null; null for every resident when the world has no dungeon. */
+export async function dungeonRoomOf() {
+  const interior = await interiorIdsNow();
+  if (!interior?.size) return null;
+  const { occupancyAll } = await import("./creature-sight.mjs");
+  const occ = await occupancyAll();
+  return (handle) => [...(occ.get(String(handle ?? "")) ?? [])].reverse().find((m) => interior.has(m)) ?? null;
+}
+export async function roomOfNow(handle) { const of = await dungeonRoomOf(); return of ? of(handle) : null; }
+/**
+ * HEARING STOPS AT A DUNGEON ROOM'S WALLS, BOTH WAYS (WLD-74): who is NOT within earshot of a voice spoken in `room` (null: the open) — every
+ * resident not in that same room. A predicate over a handle, or null when the world has no dungeon (nobody is left out).
+ */
+export async function hearersHiddenFrom(room) {
+  const of = await dungeonRoomOf();
+  return of ? (handle) => of(handle) !== (room ?? null) : null;
 }
 /**
  * WHO A READER MAY NOT SEE (WLD-74, Darko 2026-10-26: "nothing inside the dungeon you can see", the interior law both ways): a resident entered
@@ -1695,6 +1719,7 @@ function voiceEntry(voice, spoken, { at, witnesses, crossing, nonce = null }) {
       text: voice.text,
       place: voice.place ?? null,
       ...(voice.aboard ? { aboard: true } : {}),
+      ...(voice.room ? { room: voice.room } : {}), // WLD-74: spoken inside a dungeon room: its record is shown only to readers in that room
       ...(standAs ? { stood_with: standAs } : {}),
     },
     effect: "the words were spoken where the actor stood and heard by whoever was within earshot; hearing fades, the record does not",
@@ -1809,6 +1834,7 @@ hearing.refresh().catch(() => {});
 export const hearingWindowAt = (at) => hearing.read(at);
 
 const voices = createVoices({
+  roomOf: roomOfNow, // WLD-74: the dungeon room a speaker or an ear is entered in
   // the record sentence rides the conversation only while the office keeps
   // the record — the say card's own rule (dial 6, SAY_RECORD_DISCLOSURE)
   recordKept: emissionsEnabled,
@@ -1909,7 +1935,9 @@ export async function projectedNearbyMany(ears, atMs = Date.now()) {
   if (!presenceEnabled()) return ears.map(() => null);
   const { rowsFor } = await projectedPresenceRows(atMs);
   const rows = await rowsFor(null, atMs);
-  return ears.map(({ at }) => rows
+  const of = await dungeonRoomOf();
+  return ears.map(({ at, room = null }) => rows
+    .filter((r) => !of || of(r.handle) === (room ?? null)) // WLD-74: hearing stops at a dungeon room's walls
     .map((r) => ({ handle: r.handle, d: Math.round(Math.hypot(r.x - at.x, r.y - at.y)), exact: Math.hypot(r.x - at.x, r.y - at.y) }))
     .filter((r) => r.exact <= EARSHOT_M)
     .sort((a, b) => a.d - b.d || (a.handle < b.handle ? -1 : 1))
@@ -3902,7 +3930,8 @@ export async function witnessStampAt(handle, here, known = null) {
     // `presentNear` is null when the presence layer is switched off at this
     // office, and `{unavailable}` when it tripped. Both are "could not see",
     // and neither is "nobody was there".
-    const seen = await presentNear(here, { exclude: [handle], repo: WORLD_CLONE, ...(await keptPresence()) });
+    // WLD-74: a witness is heard in the actor's own room (the open, for an actor in none); hearing stops at a dungeon room's walls
+    const seen = await presentNear(here, { exclude: [handle], hide: await hearersHiddenFrom(await roomOfNow(handle)), repo: WORLD_CLONE, ...(await keptPresence()) });
     const witnesses = seen == null ? pinWitnesses({ unread: "presence-off" })
       : seen.unavailable ? pinWitnesses({ unread: seen.unavailable })
       : pinWitnesses({ residents: seen.residents ?? [], centreOf, chainAt: groundAt }); // a witness is pinned to ground too, never a thing (W4)

@@ -34,9 +34,31 @@ let occupancySeam = null;
 /** Test seam: `fn()` answers a Map<handle, [marks…]> (or null to read the ledger again). */
 export function __setOccupancyForTest(fn) { occupancySeam = typeof fn === "function" ? fn : null; }
 
-/** Every resident's entered stack now: the enter ledger folded at the clock, once. An unreadable ledger is an empty Map. */
+// THE LEDGER IS FOLDED ONCE A SECOND, NOT ONCE A CALL. One embodied read asks "who has entered what" from several places (the creature view, the labels,
+// the presence filter, the ring); the answer is shared for OCCUPANCY_TTL_MS and by every caller in flight, and the enter and exit doors forget it the
+// moment they write (world-crossings.mjs), so a resident who has just entered reads the room at once. The Map is shared: callers never change it.
+export const OCCUPANCY_TTL_MS = 1000;
+let memo = null; // { at, p }
+export function forgetOccupancy() { memo = null; }
+/** How many times the ledger has been folded since the process began (the load, measured). */
+export const folds = { n: 0 };
+
+/** Every resident's stack now: the enter ledger folded at the clock (shared for a second). An unreadable ledger is an empty Map. */
 export async function occupancyAll() {
   if (occupancySeam) return Promise.resolve(occupancySeam()).then((m) => (m instanceof Map ? m : new Map())).catch(() => new Map());
+  const now = Date.now();
+  if (memo && now - memo.at < OCCUPANCY_TTL_MS) return memo.p;
+  const mine = { at: Infinity, p: readOccupancy() }; // valid while it is being read; its second starts when it lands
+  memo = mine;
+  mine.p.then((m) => { if (memo !== mine) return; if (m.size) mine.at = Date.now(); else memo = null; }, () => { if (memo === mine) memo = null; }); // an empty or failed read is not kept
+  return mine.p;
+}
+let readerSeam = null;
+/** Test seam: `fn()` answers the Map the ledger fold would, so the sharing of it can be counted. */
+export function __setOccupancyReaderForTest(fn) { readerSeam = typeof fn === "function" ? fn : null; }
+async function readOccupancy() {
+  folds.n += 1;
+  if (readerSeam) return readerSeam();
   try {
     const [{ crossingLaw }, { crossingDeps }, { occupancyNowAll }] = await Promise.all([
       import("./world-crossings.mjs"), import("./world-apex.mjs"), import("./world.mjs")]);

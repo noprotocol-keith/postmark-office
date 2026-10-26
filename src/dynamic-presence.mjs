@@ -305,6 +305,9 @@ async function projectedPresence({ repo, atMs, walk, engine, world, where, roll,
  * carry no place words, which is the right default for a world-wide read where
  * the count is unbounded.
  */
+/** `hide` as a predicate over a handle: a Set of handles, or a function, or nothing (WLD-74: who a reader may not see or hear). */
+const hidden = (hide) => (typeof hide === "function" ? hide : hide?.size ? (h) => hide.has(h) : null);
+
 export async function near({
   x, y, radiusM = PRESENCE_DIALS.near_radius_m, limit = PRESENCE_DIALS.near_cap,
   exclude = [], place = null, dbPath = null, repo = WORLD_CLONE, atMs = Date.now(),
@@ -313,7 +316,7 @@ export async function near({
   const read = await readPresence({ dbPath, repo, atMs, walk, engine, world, where, roll, projected, placed });
   if (read.error) return { error: read.error, detail: read.detail, residents: [], count: 0 };
   // WLD-74: a resident inside a dungeon room is seen only by readers inside it (world.mjs § insidersHiddenFrom)
-  const rows = hide?.size ? read.rows.filter((r) => !hide.has(r.handle)) : read.rows;
+  const rows = hidden(hide) ? read.rows.filter((r) => !hidden(hide)(r.handle)) : read.rows;
 
   const skip = new Set(exclude);
   const here = { x, y };
@@ -379,7 +382,7 @@ export async function everyone({
 } = {}) {
   const read = await readPresence({ dbPath, repo, atMs, walk, engine, world, where, roll, projected, placed });
   if (read.error) return { error: read.error, detail: read.detail, residents: [], count: 0 };
-  const rows = hide?.size ? read.rows.filter((r) => !hide.has(r.handle)) : read.rows; // WLD-74, as near()
+  const rows = hidden(hide) ? read.rows.filter((r) => !hidden(hide)(r.handle)) : read.rows; // WLD-74, as near()
 
   const residents = [];
   for (const r of rows) {

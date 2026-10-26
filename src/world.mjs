@@ -1122,6 +1122,54 @@ const determinedOf = (w) => w?._raw?.worldState?.determined ?? null;
 // point: the shadow's agreement then means "the store holds the same world",
 // which is the only question a serving flag actually has to answer. A second
 // implementation over the store would have made the diff measure my typing.
+/** The words from outside every dungeon (what nobody who has not entered may read past) and the whole world's. */
+/**
+ * The marks nobody outside a dungeon may name (WLD-74): what the one sight function (standpointSight, no occupancy) leaves out of the
+ * published world. Null when the world cannot be read, which callers treat as "name nothing".
+ */
+export async function interiorIdsNow() {
+  try {
+    const w = await world();
+    const { verbs } = await mods();
+    if (typeof verbs?.standpointSight !== "function") return new Set();
+    const seen = new Set(verbs.standpointSight(w, {}).marks.map((m) => m.id));
+    return new Set((w.marks ?? []).filter((m) => !seen.has(m.id)).map((m) => m.id));
+  } catch { return null; }
+}
+/**
+ * WHO A READER MAY NOT SEE (WLD-74, Darko 2026-10-26: "nothing inside the dungeon you can see", the interior law both ways): a resident entered
+ * in a room inside a dungeon is seen only by a reader entered in the same room. Dungeons only: a house and any other interior is untouched.
+ * `reader` is whose standpoint it is (null for a keyless read, who has entered nothing). The set of handles to leave out; empty when the world
+ * has no dungeon, and the ledger is read only when it has one.
+ */
+export async function insidersHiddenFrom(reader) {
+  const interior = await interiorIdsNow();
+  if (!interior?.size) return new Set();
+  const { occupancyAll } = await import("./creature-sight.mjs");
+  return hiddenInsiders(await occupancyAll(), interior, reader);
+}
+/** The pure half: every handle in `occupancy` (Map handle → stack) whose innermost interior mark is not in `reader`'s stack. */
+export function hiddenInsiders(occupancy, interior, reader) {
+  const mine = new Set(occupancy.get(String(reader ?? "")) ?? []);
+  const hide = new Set();
+  for (const [h, stack] of occupancy) {
+    if (h === reader) continue;
+    const inner = [...stack].reverse().find((m) => interior.has(m));
+    if (inner && !mine.has(inner)) hide.add(h);
+  }
+  return hide;
+}
+export const hideInsiders = (rows, hide) => (hide?.size ? (rows ?? []).filter((r) => !hide.has(r?.handle)) : rows);
+
+/** `rows` with each `mark_id` that names an interior mark left null (every one, when the interior cannot be told). */
+export const hideInteriorTargets = (rows, hidden) => (rows ?? []).map((r) => (r && r.mark_id != null && (hidden == null || hidden.has(r.mark_id)) ? { ...r, mark_id: null } : r));
+
+export function bothWords(w, { x, y }, verbs) {
+  const inside = placeWordsFrom(w.marks ?? [], { x, y }, verbs);
+  const outside = typeof verbs?.standpointSight === "function" ? placeWordsFrom(verbs.standpointSight(w, {}).marks ?? [], { x, y }, verbs) : inside;
+  return { outside, inside };
+}
+
 export function placeWordsFrom(marks, { x, y }, verbs) {
   // A THING IS NOT GROUND. The viewer has said so since 2026-08-22 (Keemin:
   // carried things were winning the walk desk's "From"); this is the office
@@ -1168,8 +1216,24 @@ export function placeMarksFrom(marks, { x, y }, verbs) {
 // the line below said "always published main" long before there was a store;
 // the flag simply gives that sentence a second way to be true, and §1c has since
 // made it true of every other read too.
-export async function placeWords({ x, y, aboard = false, moving = false } = {}) {
+export async function placeWords({ x, y, aboard = false, moving = false, handle = null } = {}) {
+  // THE LABEL IS WHAT THE READER MAY SEE (WLD-74, Darko 2026-10-26: nothing inside a dungeon is seen from outside it). The shared,
+  // cached answer is the OUTSIDE one: a point on a room's spot reads as the dungeon itself, never the room, whatever stands there.
+  // A reader who entered the room (`handle`) is told its name, by the one function sight reads (standpointSight over their stack).
   if (aboard) return moving ? `aboard ${VESSEL_NAME}, mid-crossing` : `aboard ${VESSEL_NAME}`;
+  const both = await placeWordsBoth({ x, y });
+  if (both == null) return null;
+  if (!handle || both.outside === both.inside) return both.outside;
+  const stack = await (await import("./creature-sight.mjs")).stackOf(handle);
+  if (!stack.length) return both.outside;
+  try {
+    const w = await world();
+    const { verbs } = await mods();
+    return placeWordsFrom(sightedWorld(w, { verbs, handle: String(handle), stack }).marks ?? [], { x, y }, verbs);
+  } catch { return both.outside; }
+}
+
+async function placeWordsBoth({ x, y } = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   const cacheKey = `${Math.round(x / 10)},${Math.round(y / 10)}`;
   // In serve mode `world()` never runs, so the rebuild that normally clears this
@@ -1197,7 +1261,7 @@ export async function placeWords({ x, y, aboard = false, moving = false } = {}) 
       fold: async () => {
         const w = await world(); // place names are public — always published main
         const { verbs } = await mods();
-        return placeWordsFrom(w.marks ?? [], { x, y }, verbs);
+        return bothWords(w, { x, y }, verbs);
       },
       store: async (snap) => {
         const { verbs } = await mods();
@@ -1207,7 +1271,7 @@ export async function placeWords({ x, y, aboard = false, moving = false } = {}) 
         // what it may answer has not replaced anything.
         const spine = verbs.containmentChain({ x, y }, snap.marks).filter((m) => m.id !== WORLD_FRAME);
         const veto = pointAnswerable(snap, { x, y }, await geomMod(), { checkNearest: spine.length === 0 });
-        return veto ? cannotAnswer(veto) : placeWordsFrom(snap.marks, { x, y }, verbs);
+        return veto ? cannotAnswer(veto) : bothWords({ marks: snap.marks }, { x, y }, verbs);
       },
     });
   } catch { return null; } // no world to read: the coordinates still speak
@@ -2240,6 +2304,7 @@ export async function worldOrient(args = {}, key = null, { roll = [], crowd = fa
     // You are not your own audience — the same ruling the earshot reply follows
     // for `listeners`. A spectator glance excludes nobody: it is nobody's.
     exclude: choice.handle ? [choice.handle] : [],
+    hide: await insidersHiddenFrom(choice.handle), // WLD-74
     repo: WORLD_CLONE,
     // The fold, so presence answers over the whole position union and not the
     // walk ledger alone (issue #7 §1). This is the door the apex verb reads
@@ -2466,10 +2531,13 @@ export async function markRows(ids = [], w = null) {
  * root first (as v2's you.within), or `{ near: row }` on open ground beside a
  * place, or {} on open ground. The same derivation as placeWords (§ placeMarksFrom).
  */
-export async function placeMarksAt({ x, y } = {}) {
+export async function placeMarksAt({ x, y, handle = null } = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return {};
-  const w = await world();
+  const w0 = await world();
   const { verbs } = await mods();
+  // WLD-74: only what the reader may see (placeWords): outside every dungeon, or inside the rooms `handle` entered
+  const stack = handle ? await (await import("./creature-sight.mjs")).stackOf(handle) : [];
+  const w = typeof verbs?.standpointSight === "function" ? { ...w0, ...sightedWorld(w0, { verbs, handle: stack.length ? String(handle) : "", stack }) } : w0;
   const marks = w.marks ?? [];
   const row = (m) => ({ id: m.id, name: markName(m, marks, determinedOf(w)), body: m.body ?? "" });
   const { spine, near } = placeMarksFrom(marks, { x, y }, verbs);
@@ -2674,6 +2742,7 @@ export async function worldEyes(args = {}, key = null, { roll = [], v2 = false, 
     place: (p) => placeWords(p),
     // (`available` was injected here too — parked; see worldOrient's note.)
     exclude: choice.handle ? [choice.handle] : [],
+    hide: await insidersHiddenFrom(choice.handle), // WLD-74
     repo: WORLD_CLONE,
     world: w,
     roll, // DEC-11 — see worldOrient
@@ -2783,10 +2852,11 @@ export async function worldPresent(args = {}, { roll = null } = {}) {
   // disclosure rides along; presence carries it into `disclosed`.
   const projected = positionsProjected() ? await positionProjection.snapshot().catch(() => null) : null;
   const placed = projected ? placedAt("presence", projected.epoch) : null; // POS-284: placed once per change
-  if (!has) return presenceEveryone({ place, repo: WORLD_CLONE, world: w, roll: roll ?? [], projected, placed });
+  const hide = await insidersHiddenFrom(null); // WLD-74: a keyless read has entered nothing
+  if (!has) return presenceEveryone({ place, repo: WORLD_CLONE, world: w, roll: roll ?? [], projected, placed, hide });
   const radiusM = Number.isFinite(Number(args.radius_m)) ? Math.max(1, Number(args.radius_m)) : undefined;
   const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.floor(Number(args.limit))) : undefined;
-  return withCarryingNow(await presenceNear({ x, y, place, repo: WORLD_CLONE, world: w, roll: roll ?? [], projected, placed, ...(radiusM ? { radiusM } : {}), ...(limit ? { limit } : {}) }));
+  return withCarryingNow(await presenceNear({ x, y, place, repo: WORLD_CLONE, world: w, roll: roll ?? [], projected, placed, hide, ...(radiusM ? { radiusM } : {}), ...(limit ? { limit } : {}) }));
 }
 
 // ── a mark's image, as bytes (world_investigate with_image, 2026-08-23) ──────
@@ -5851,9 +5921,14 @@ async function sitedWithin(parcel, marks) {
 // with a ledger and a clock, this answers "what is this resident within, now",
 // and a falsifier can hand it a row from the future and watch it stay out.
 export async function occupiedNowBy(who, thresholds, deps) {
+  return [...((await occupancyNowAll(thresholds, deps)).get(who) ?? [])];
+}
+
+// Everyone's stack now, the same fold (creature-sight.mjs reads it once for a creature's many residents).
+export async function occupancyNowAll(thresholds, deps) {
   const atNow = thresholds.stampAt(deps.now());
   const acts = thresholds.parseEnterExitLedger(await deps.ledger()).acts;
-  return [...(thresholds.occupancyAt(acts, atNow).get(who) ?? [])];
+  return thresholds.occupancyAt(acts, atNow);
 }
 
 // ── THE RECEIPT IS WRITTEN AT DEPARTURE, SO IT SPEAKS IN DEPARTURE'S TENSE ──
@@ -6819,7 +6894,7 @@ export async function worldWalkers(worldClone, key = null, { roll = null } = {})
     return {
       at,
       // each row says its standing, as every heard say does (POS-739): presence is labelled like voices
-      walkers: walkerLandings(walkerPaces(movementV2Enabled() ? await walkersInFrames(walkers, w) : walkers, departures, { currentDeparture, WALK_KM_PER_CROSSING }), departures, { currentDeparture }).map((r) => withStanding(r)),
+      walkers: hideInsiders(hideInteriorTargets(walkerLandings(walkerPaces(movementV2Enabled() ? await walkersInFrames(walkers, w) : walkers, departures, { currentDeparture, WALK_KM_PER_CROSSING }), departures, { currentDeparture }).map((r) => withStanding(r)), await interiorIdsNow()), await insidersHiddenFrom(null)),
       // The disclosure the reader assembled, carried rather than dropped. A door
       // that reads half the record and says nothing is the failure this whole
       // change is about.
@@ -6829,7 +6904,7 @@ export async function worldWalkers(worldClone, key = null, { roll = null } = {})
     };
   } catch {
     // No world to fold: the walk ledger alone is still an honest answer.
-    return { at, walkers: publicWalkers(departures, at).map((r) => withStanding(r)) };
+    return { at, walkers: hideInsiders(hideInteriorTargets(publicWalkers(departures, at).map((r) => withStanding(r)), null), await insidersHiddenFrom(null)) };
   }
 }
 

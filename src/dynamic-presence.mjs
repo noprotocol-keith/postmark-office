@@ -308,16 +308,18 @@ async function projectedPresence({ repo, atMs, walk, engine, world, where, roll,
 export async function near({
   x, y, radiusM = PRESENCE_DIALS.near_radius_m, limit = PRESENCE_DIALS.near_cap,
   exclude = [], place = null, dbPath = null, repo = WORLD_CLONE, atMs = Date.now(),
-  walk = null, engine = null, world = null, where = null, roll = [], projected = null, placed = null,
+  walk = null, engine = null, world = null, where = null, roll = [], projected = null, placed = null, hide = null,
 } = {}) {
   const read = await readPresence({ dbPath, repo, atMs, walk, engine, world, where, roll, projected, placed });
   if (read.error) return { error: read.error, detail: read.detail, residents: [], count: 0 };
+  // WLD-74: a resident inside a dungeon room is seen only by readers inside it (world.mjs § insidersHiddenFrom)
+  const rows = hide?.size ? read.rows.filter((r) => !hide.has(r.handle)) : read.rows;
 
   const skip = new Set(exclude);
   const here = { x, y };
   const { bearingDeg, quantizeBearing, distanceBand } = read.engine;
 
-  const hits = read.rows
+  const hits = rows
     .filter((r) => !skip.has(r.handle) && dist(r, here) <= radiusM)
     .map((r) => ({ ...r, distance_m: Math.round(dist(r, here)) }))
     .sort((a, b) => a.distance_m - b.distance_m || (a.handle < b.handle ? -1 : 1));
@@ -373,13 +375,14 @@ export async function near({
  */
 export async function everyone({
   place = null, dbPath = null, repo = WORLD_CLONE, atMs = Date.now(), walk = null, engine = null,
-  world = null, where = null, roll = [], projected = null, placed = null,
+  world = null, where = null, roll = [], projected = null, placed = null, hide = null,
 } = {}) {
   const read = await readPresence({ dbPath, repo, atMs, walk, engine, world, where, roll, projected, placed });
   if (read.error) return { error: read.error, detail: read.detail, residents: [], count: 0 };
+  const rows = hide?.size ? read.rows.filter((r) => !hide.has(r.handle)) : read.rows; // WLD-74, as near()
 
   const residents = [];
-  for (const r of read.rows) {
+  for (const r of rows) {
     residents.push({
       handle: r.handle,
       at: { x: round1(r.x), y: round1(r.y) },

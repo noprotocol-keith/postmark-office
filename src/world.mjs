@@ -1495,10 +1495,38 @@ async function enteredNow(handle, inPlay) {
   } catch { return null; }
 }
 
-/** The refusal for a road into the wall, in plain words. */
-export function mistsRefusal(bounce, at, extra = {}) {
+/** How near a refused road's wall point must be to the old track for the refusal to name it (WLD-6). */
+export const OLD_TRACK_NEAR_M = 1500;
+
+/** The one sentence that names the old track, or null. PURE over the engine's own kept air (`boxes`, `since`: the
+ *  engine's exports KEPT_AIR and KEPT_AIR_SINCE; the office never keeps a copy), the crossing and where the road
+ *  met the wall. The first box is the track proper: its north end is its largest y, and it runs south (toward
+ *  smaller y) to the Spire's back wall. Null when the engine names no track, the track is not yet kept air this
+ *  crossing, or the wall point is farther than OLD_TRACK_NEAR_M from it: the refusal then reads as it always did. */
+export function oldTrackSentence(boxes, since, crossing, at) {
+  const t = Array.isArray(boxes) ? boxes[0] : null;
+  if (!t || ![t.minX, t.maxX, t.minY, t.maxY].every(Number.isFinite)) return null;
+  if (!(Number(crossing) >= Number(since))) return null;
+  if (!Number.isFinite(at?.x) || !Number.isFinite(at?.y)) return null;
+  const gap = Math.hypot(Math.max(t.minX - at.x, 0, at.x - t.maxX), Math.max(t.minY - at.y, 0, at.y - t.maxY));
+  if (gap > OLD_TRACK_NEAR_M) return null;
+  const mid = Math.round((t.minX + t.maxX) / 2);
+  return `There is one way through here: an old track of clear air runs due south through the mist along x ${t.minX} to ${t.maxX}, from (${mid}, ${t.maxY}) to the Spire's back wall. Walk to its north end first, then straight south along it.`;
+}
+
+/** The old-track sentence for a refused road, read from the engine at the newest blessing. An engine that does not
+ *  export the kept air (or will not load) says nothing extra: fail quiet, never wrong. */
+export async function mistsTrackHint(worldClone, at, crossing) {
+  try {
+    const eng = await importEngineAt(worldClone, "world-engine.mjs");
+    return oldTrackSentence(eng.KEPT_AIR, eng.KEPT_AIR_SINCE, crossing, at);
+  } catch { return null; }
+}
+
+/** The refusal for a road into the wall, in plain words. `track` is mistsTrackHint's sentence, when there is one. */
+export function mistsRefusal(bounce, at, extra = {}, track = null) {
   return bounce(422, "the mist is too thick to walk into",
-    `this road runs into the wall of the Mists at (${at.x}, ${at.y}), and no road goes into the wall, ends on it or crosses it. Choose a point short of it: walking into the mist's edge is allowed, but the deeper a road goes the slower it walks, and at the wall it stops altogether.`,
+    `this road runs into the wall of the Mists at (${at.x}, ${at.y}), and no road goes into the wall, ends on it or crosses it. Choose a point short of it: walking into the mist's edge is allowed, but the deeper a road goes the slower it walks, and at the wall it stops altogether.${track ? ` ${track}` : ""}`,
     { law: "LOGOS/classes.md § The emission lines: the Mists (POS-466, POS-468)", wall_at: at, ...extra });
 }
 
@@ -6285,7 +6313,7 @@ async function walkAct(worldClone, payload = {}, key = null, { approach = null }
   // changes.
   const shelter = occupying ? roadShelter(law.verbs, occupying.w, occupying.stack, occupying.leaving) : null;
   let mistRoad = await mistsOnTheRoad(worldClone, skeleton, from, toward, at, { shelter });
-  if (mistRoad?.refused) throw mistsRefusal(bounce, mistRoad.refused);
+  if (mistRoad?.refused) throw mistsRefusal(bounce, mistRoad.refused, {}, await mistsTrackHint(worldClone, mistRoad.refused, at));
 
   if (occupying) {
     const { deps, stack, byId, leaving } = occupying;
@@ -6332,7 +6360,7 @@ async function walkAct(worldClone, payload = {}, key = null, { approach = null }
   // stepping ashore moved the road's start: read the Mists again from where it now begins
   if (setDownFirst) {
     mistRoad = await mistsOnTheRoad(worldClone, skeleton, from, toward, at, { shelter });
-    if (mistRoad?.refused) throw mistsRefusal(bounce, mistRoad.refused, { exited_first: exitedFirst });
+    if (mistRoad?.refused) throw mistsRefusal(bounce, mistRoad.refused, { exited_first: exitedFirst }, await mistsTrackHint(worldClone, mistRoad.refused, at));
   }
   const mistFactor = mistRoad && mistRoad.factor < 1 ? mistRoad.factor : null;
   const clean = { handle: who, from, toward, at, targetExtent, targetMarkId, ...(mistFactor ? { mistFactor } : {}) };

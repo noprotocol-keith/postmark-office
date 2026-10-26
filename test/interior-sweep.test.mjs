@@ -330,3 +330,31 @@ test("the keyless store presence routes leave out a resident entered in a room: 
   const p = { query: async (sql, args) => (/FROM acts/i.test(sql) ? { rows: acts } : pool().query(sql, args)) };
   assert.deepEqual([...await insiderHandles(p)], ["ann"], "ann is in the hall; bo only in the keep; cy came out");
 });
+
+test("the keyless routes themselves: /world2/present, /world2/positions and the apex's present list no resident entered in a room, and no coordinates of one", async (t) => {
+  if (WHY) return t.skip(WHY);
+  const walk = (id, handle, to) => ({ id, at: new Date("2026-10-26T16:40:00Z"), crossing: "300", actor: handle, action: "walk",
+    payload: { from: { x: 2000, y: 2000 }, toward: { x: 2000, y: 2000 }, within: null, to, pace: 60 } });
+  const enter = (id, handle, mark, act) => ({ id, at: new Date("2026-10-26T16:30:00Z"), crossing: null, actor: handle, action: act === "enters" ? "legacy:enter" : "legacy:exit",
+    payload: { _ledger: "WORLD/enter-exit-ledger.md", iso: "2026-10-26T16:30:00.000Z", handle, act, mark, at: 1, word: "neutral" } });
+  const departures = [walk(1, "ann", null), walk(2, "bo", null), walk(3, "cy", null)];
+  const passages = [enter(10, "ann", KEEP, "enters"), enter(11, "ann", HALL, "enters"), enter(12, "bo", KEEP, "enters")];
+  const p = { query: async (sql, args) => {
+    if (/FROM acts/i.test(sql)) return { rows: (args?.[0] ?? []).includes("legacy:enter") ? passages : departures };
+    if (/FROM town_roll/i.test(sql)) return { rows: [{ handle: "ann" }, { handle: "bo" }, { handle: "cy" }] };
+    if (/FROM identities/i.test(sql)) return { rows: [] };
+    if (/FROM marks WHERE status/i.test(sql)) return { rows: ROWS };
+    return pool().query(sql, args);
+  } };
+  const handlesOf = (list) => (list ?? []).map((r) => r.handle).sort();
+  const present = await world2Serve("/world2/present", new URLSearchParams(""), { p });
+  assert.equal(present.code, 200, JSON.stringify(present.body).slice(0, 300));
+  assert.deepEqual(handlesOf(present.body.residents), ["bo", "cy"], "ann, entered in the great room, is not listed");
+  assert.equal(present.body.count, 2);
+  const positions = await world2Serve("/world2/positions", new URLSearchParams(""), { p });
+  assert.equal(positions.code, 200, JSON.stringify(positions.body).slice(0, 300));
+  assert.deepEqual(handlesOf(positions.body.walkers), ["bo", "cy"]);
+  const apexed = await world2Apex(new URLSearchParams({ x: String(HALL_AT.x), y: String(HALL_AT.y), crossing: "1" }), { p });
+  assert.ok(!apexed.error, JSON.stringify(apexed.error?.body));
+  assert.deepEqual(handlesOf(apexed.body.present?.residents), ["bo", "cy"], "the apex's present at the room's own spot");
+});

@@ -109,11 +109,13 @@ test("keyless presence over the W2 form: a resident entered in a room is not lis
   } };
   const handlesOf = (list) => (list ?? []).map((r) => r.handle).sort();
   const present = await world2Serve("/world2/present", new URLSearchParams(""), { p });
-  assert.deepEqual(handlesOf(present.body.residents), ["bo", "cy"]);
+  assert.deepEqual(handlesOf(present.body.residents), ["cy"], "ann (a room) and bo (the keep itself) have entered");
   assert.deepEqual(leaks(present.body), [], "/world2/present names no room");
   const positions = await world2Serve("/world2/positions", new URLSearchParams(""), { p });
-  assert.deepEqual(handlesOf(positions.body.walkers), ["bo", "cy"]);
+  assert.deepEqual(handlesOf(positions.body.walkers), ["cy"]);
   const apexed = await world2Apex(new URLSearchParams({ x: String(HALL_AT.x), y: String(HALL_AT.y), crossing: "1" }), { p });
-  assert.deepEqual(handlesOf(apexed.body.present?.residents), ["bo", "cy"]);
+  assert.deepEqual(handlesOf(apexed.body.present?.residents), ["cy"]);
+  const occ = await world2Serve("/world2/occupancy", new URLSearchParams(""), { p });
+  assert.deepEqual(occ.body.inside, {}, "nobody who has entered the keep or a room in it is on the stacks");
   assert.deepEqual(leaks(apexed.body), [], "the apex names no room, in a place word or anywhere else");
 });

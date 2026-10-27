@@ -1163,6 +1163,11 @@ export async function interiorIdsNow() {
   } catch { return null; }
 }
 
+/** The dungeons themselves in the published world (empty when it cannot be read). */
+async function dungeonIdsNow() {
+  try { const { verbs } = await mods(); const w = await world(); return typeof verbs?.isDungeon === "function" ? (w.marks ?? []).filter((m) => verbs.isDungeon(m)).map((m) => m.id) : []; } catch { return []; }
+}
+
 /** The dungeon room a resident is entered in now (the innermost interior mark of their stack), or null; null for every resident when the world has no dungeon. */
 export async function dungeonRoomOf() {
   const interior = await interiorIdsNow();
@@ -1189,8 +1194,10 @@ export async function hearersHiddenFrom(room) {
 export async function insidersHiddenFrom(reader) {
   const interior = await interiorIdsNow();
   if (!interior?.size) return new Set();
+  // entered a dungeon is inside it: the dungeon is the room when it is the innermost entry on a stack (WLD-74)
+  const inside = new Set([...interior, ...(await dungeonIdsNow())]);
   const { occupancyAll } = await import("./creature-sight.mjs");
-  return hiddenInsiders(await occupancyAll(), interior, reader);
+  return hiddenInsiders(await occupancyAll(), inside, reader);
 }
 /** The pure half: every handle in `occupancy` (Map handle → stack) whose innermost interior mark is not in `reader`'s stack. */
 export function hiddenInsiders(occupancy, interior, reader) {

@@ -170,7 +170,11 @@ async function geomMod() {
 // ONE WORLD, and it takes no identity to ask for (§1c). Every caller below used
 // to thread a key through here so a drafter could be handed a different, folded
 // world; there is no such world any more, so there is no key to thread.
+let _worldSeam = null;
+/** Tests only: `w` is the published world, or null to read the clone again. */
+export const __setWorldForTest = (w) => { _worldSeam = w ?? null; };
 async function world() {
+  if (_worldSeam) return _worldSeam;
   _worldAsks += 1;
   const selected = publishedState(WORLD_CLONE);
   const cached = _worlds.get(selected.ref);
@@ -251,6 +255,22 @@ async function sightFor(w, handle, key = null, { lens = null } = {}) {
     stack = law?.thresholds ? await occupiedNowBy(who, law.thresholds, crossingDeps()).catch(() => []) : [];
   }
   return sightedWorld(w, { verbs, handle: who, stack, key, lens });
+}
+
+/**
+ * WHO MAY REACH A MARK (WLD-74): a thing inside a dungeon room is reachable, as ground and by a take, only by a resident whose occupancy
+ * stack holds that room. Not a second containment test: the marks `sightFor` leaves in a resident's world (the one function every read asks).
+ * A predicate over a mark id, or null when the world hides nothing from anyone (no dungeon), so the common case reads no ledger.
+ */
+export async function reachableBy(handle, key = null) {
+  const w = await heldPlaced(await world()); // a held thing is in hands, not in the room it was picked up in (POS-688)
+  const { verbs } = await mods();
+  if (typeof verbs?.standpointSight !== "function" || verbs.standpointSight(w, {}) === w) return null;
+  const { occupancyAll } = await import("./creature-sight.mjs"); // the shared enter-ledger fold (an unreadable ledger is nobody entered anywhere)
+  const who = String(handle ?? "").trim();
+  const stack = who ? [...((await occupancyAll()).get(who) ?? [])] : [];
+  const seen = new Set((sightedWorld(w, { verbs, handle: who, stack, key }).marks ?? []).map((m) => m.id));
+  return (id) => seen.has(String(id));
 }
 
 /** The pure half of sightFor, so a test can hand it the clone's verbs: the

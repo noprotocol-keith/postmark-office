@@ -20,6 +20,7 @@ const TMP = mkdtempSync(join(tmpdir(), "dungeon-reach-"));
 const KEEP = "fortholders/the-fort", HALL = "fortholders/the-great-room", VAULT = "fortholders/the-cellar";
 const HALL_LAMP = "fortholders/the-hall-lamp", VAULT_LAMP = "fortholders/the-cellar-lamp", BENCH = "townsfolk/a-bench";
 const HALL_AT = { x: 2000, y: 2000 }, VAULT_AT = { x: 2150, y: 2150 };
+const ANNEX = "fortholders/the-annex", ANNEX_LAMP = "fortholders/the-annex-lamp"; // a room 50 m from the hall, with a lamp
 
 const mark = (id, kind, x, y, w, h, by = id.split("/")[0]) => ({ id, kind, by, household: by, tier: "market", at: { x, y }, extent: { w, h }, body: id, date: "2026-09-02T00:00:00Z" });
 const MARKS = [
@@ -27,6 +28,7 @@ const MARKS = [
   mark(HALL, "sited", 2000, 2000, 60, 60), mark(VAULT, "sited", 2150, 2150, 60, 60),
   mark(HALL_LAMP, "thing", 2005, 2005, 1, 1), mark(VAULT_LAMP, "thing", 2150, 2150, 1, 1),
   mark(BENCH, "thing", 100, 100, 2, 1),
+  mark(ANNEX, "sited", 2070, 2000, 40, 40), mark(ANNEX_LAMP, "thing", 2070, 2000, 1, 1),
 ];
 const stackOf = (...marks) => new Map([["ann", marks]]);
 const OUTSIDE = stackOf(), NEXT_DOOR = stackOf(KEEP, VAULT), INSIDE = stackOf(KEEP, HALL);
@@ -118,4 +120,35 @@ test("[pin] the take door, the ground read and a set-down holder's reach each as
   assert.match(read("world-units.mjs"), /reachable: async \(id, actor\) => \{ const r = await world\.reachableBy\(String\(actor\)\)/, "world-units § liveUnitDeps");
   assert.match(read("world-kinds.mjs"), /deps\.reachable && !\(await deps\.reachable\(String\(id\), actor\)\)/, "world-kinds § reachHolder");
   void worldModuleUrl;
+});
+
+// ── a stack holding ONLY the dungeon (entered by its own door, no room): the reach into a room next to the one it stands in ──
+
+const KEEP_ONLY = stackOf(KEEP);
+
+test("a stack holding only the dungeon, standing in the hall's footprint, cannot reach the annex lamp 50 m off (rooms it has not entered show as outsides)", { skip: NO_WORLD || false }, async () => {
+  await withWorld(async ({ reachableBy }) => {
+    __setOccupancyForTest(() => KEEP_ONLY);
+    const r = await reachableBy("ann");
+    assert.equal(r(ANNEX_LAMP), false, "the annex lamp, through reachableBy");
+    assert.equal(r(HALL_LAMP), false, "the hall lamp too: this stack has entered no room");
+    assert.equal(r(ANNEX), true, "the annex itself reads as its outside");
+    assert.equal(r(KEEP), true);
+    const { reachContext } = await import("../src/world-hold.mjs");
+    assert.equal((await reachContext(ANNEX_LAMP, "ann"))?.mark ?? null, null, "the take door");
+    const { SCHEMA } = await import("../src/world-store.mjs");
+    void SCHEMA;
+  });
+});
+
+test("the take read's ground, for a dungeon-only stack standing in the hall, lists neither room's lamp", { skip: NO_WORLD || false }, async () => {
+  await withGround(async () => {
+    await withWorld(async () => {
+      const { groundWithinReach } = await import("../src/world-apex.mjs");
+      __setOccupancyForTest(() => KEEP_ONLY);
+      const a = await groundWithinReach({ standpoint: { x: 2020, y: 2000, handle: "ann" } }, { handles: new Set(["ann"]) });
+      assert.ok(!a.unavailable, a.unavailable);
+      assert.deepEqual(a.things.map((t) => t.thing), []);
+    });
+  });
 });

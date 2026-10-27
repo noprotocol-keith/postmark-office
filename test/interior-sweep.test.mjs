@@ -322,6 +322,9 @@ test("a resident entered in a dungeon room is seen only by readers entered in th
   assert.deepEqual([...hiddenInsiders(occ, withKeep, null)].sort(), ["ann", "bo", "cy"], "a keyless reader sees neither the rooms nor those who entered the keep; di (a house) stays");
   assert.deepEqual([...hiddenInsiders(occ, withKeep, "bo")].sort(), ["ann", "cy"], "bo, in the keep, sees only those whose innermost entry is the keep too");
   assert.deepEqual([...hiddenInsiders(occ, withKeep, "ann")].sort(), ["cy"], "ann, in the hall, still sees bo (the keep is on her stack)");
+  const withEv = ledger([["ann", "enters", KEEP, 1], ["ann", "enters", HALL, 2], ["bo", "enters", KEEP, 1], ["ev", "enters", KEEP, 1]]);
+  assert.deepEqual([...hiddenInsiders(withEv, withKeep, "bo")], ["ann"], "stack [keep] only: ev (the same stack) is present to bo, and absent from a stranger");
+  assert.deepEqual([...hiddenInsiders(withEv, withKeep, "zed")].sort(), ["ann", "bo", "ev"], "a reader who entered nothing sees none of them");
   assert.deepEqual(hideInsiders([{ handle: "ann" }, { handle: "bo" }], new Set(["ann"])), [{ handle: "bo" }]);
 });
 

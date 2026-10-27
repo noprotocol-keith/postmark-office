@@ -269,8 +269,34 @@ export async function reachableBy(handle, key = null) {
   const { occupancyAll } = await import("./creature-sight.mjs"); // the shared enter-ledger fold (an unreadable ledger is nobody entered anywhere)
   const who = String(handle ?? "").trim();
   const stack = who ? [...((await occupancyAll()).get(who) ?? [])] : [];
-  const seen = new Set((sightedWorld(w, { verbs, handle: who, stack, key }).marks ?? []).map((m) => m.id));
+  const held = new Set(stack);
+  const sighted = sightedWorld(w, { verbs, handle: who, stack, key }).marks ?? [];
+  // THE ENGINE'S SIGHT WALKS ONE LEVEL FROM THE INNERMOST MARK A STACK HOLDS (portals.mjs § hiddenFrom), so a stack holding only the dungeon is shown
+  // what sits in every room of it. A thing in a room is reachable only when that room is on the stack: the room it stands in is found by the engine's own containerOf
+  // (portals.mjs, the test roomHolds ends in; ringRoomOf is not in the blessed engine), and the stack must hold it, as #784 asks of a creature
+  // (creature-sight.mjs § enteredBy). The dungeon itself as the room, no room, and a room mark
+  // (its own outside) pass.
+  const roomOf = await roomsOfInterior(w);
+  const seen = new Set(sighted.filter((m) => { const room = roomOf.get(m.id); return !room || room === m.id || held.has(room); }).map((m) => m.id));
   return (id) => seen.has(String(id));
+}
+const _roomsOf = new WeakMap(); // the published world object -> Map(interior mark id -> the id of the room it stands in), once per fold
+async function roomsOfInterior(w) {
+  const kept = _roomsOf.get(w);
+  if (kept) return kept;
+  const out = new Map();
+  const interior = await interiorIdsNow();
+  if (interior?.size) {
+    const portals = await engineImport("portals.mjs");
+    const dungeons = new Set((w.marks ?? []).filter((m) => portals.isDungeon(m)).map((m) => m.id));
+    for (const m of w.marks ?? []) {
+      if (!interior.has(m.id) || !m.at) continue;
+      const room = typeof portals.containerOf === "function" ? portals.containerOf(m, w.marks) : { id: m.id + "#unknown" }; // no way to tell the room: the stack cannot hold it
+      if (room && !dungeons.has(room.id)) out.set(m.id, room.id);
+    }
+  }
+  _roomsOf.set(w, out);
+  return out;
 }
 
 /** The pure half of sightFor, so a test can hand it the clone's verbs: the

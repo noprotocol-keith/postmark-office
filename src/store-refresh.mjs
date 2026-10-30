@@ -11,7 +11,8 @@
 // have held the guard for good. #595's first answer, a JS race that freed the
 // guard at the bound, freed the guard and NOT the connection: the next tick took
 // a third connection and queued for a fourth, and the pen pool is three per
-// thread (world2-pen.mjs § pool), shared with every resident read and write.
+// pool instance (world2-pen.mjs § pool; one instance per thread when it is built
+// once), shared with every resident read and write.
 // The poll would have held the whole pen, and residents met StoreAcquireTimeout.
 // So the bound rides each read itself: the poll's reads run with
 // statement_timeout = STORE_READ_BOUND_MS (server.mjs), Postgres cancels a read

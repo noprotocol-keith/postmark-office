@@ -5,11 +5,15 @@
 //   node --import ./test/helpers/sparse-guard.mjs --test test/store-refresh-serialization.test.mjs
 //
 // THE DEFECT. server.mjs read the roll and the probe at the same time, so the poll
-// held two of a thread's three pen connections, and the boot read ran beside the
-// poll's guard, so a boot read still waiting when the first tick came made a
-// second pair: three connections held and a fourth asked for. Darko 2026-10-29:
-// "Serialize them", "Probe first". So each refresh is the probe, then the roll,
-// and the boot read is the same guarded tick as the interval's.
+// held two pen connections at once, and the boot read ran beside the poll's
+// guard, so a boot read still waiting when the first tick came started a second
+// pair. Measured here on the old code: FOUR of thread 0's pen sessions blocked at
+// once. The pen is three per pool instance (world2-pen.mjs § pool); the old
+// boot's two concurrent first asks can build two instances there (the separately
+// reported lazy-init race, not changed by this file), which is how four exceed
+// three. Darko 2026-10-29: "Serialize them", "Probe first". So each refresh is
+// the probe, then the roll, and the boot read is the same guarded tick as the
+// interval's.
 //
 // THE INSTRUMENT IS THE REAL OFFICE. A spawned src/server.mjs on a store of this
 // file's own, with no read worker (so its pen is thread 0's, `postmark-office:pen:t0`)
@@ -21,7 +25,10 @@
 // while it is counted, and nothing else in a fresh office reads town_residents.
 //
 // Selective failures, never a shared refusal: a reader fails alone when the test
-// cancels ITS backend (pg_cancel_backend), named by its statement. And a roll is
+// cancels ITS backend (pg_cancel_backend), named by its statement, or when its own
+// statement reaches the office's unchanged 10 s statement_timeout. A roll left
+// waiting outlives the boot's 10 s race, so the office is seen listening while
+// that read still holds the guard and the ticks after it skip. And a roll is
 // made to wait alone by Postgres's lock queue: a second locker queued behind a
 // waiting probe takes the table the moment the probe's transaction ends, so the
 // roll after it waits while the probe has already published.
@@ -70,6 +77,7 @@ test("POS-815 · the index refresh reads the probe, then the roll, one pen conne
     `SELECT pid, query FROM pg_stat_activity
       WHERE datname = $1 AND application_name = $2 AND $3 = ANY(pg_blocking_pids(pid))`,
     [store.database, PEN_T0, locker.pid])).rows.map((r) => ({ pid: r.pid, kind: kindOf(r.query) }));
+  const BOUND_WAIT = 15_000; // past the office's 10 s boot race and its 10 s statement bound, both unchanged
   const until = async (what, fn, ms = 8_000) => {
     const end = Date.now() + ms;
     for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) assert.fail(`${what}, within ${ms} ms\n${said.slice(-1500)}`); await sleep(25); }
@@ -103,7 +111,7 @@ test("POS-815 · the index refresh reads the probe, then the roll, one pen conne
   office.stdout.on("data", (x) => { said += String(x); });
   office.stderr.on("data", (x) => { said += String(x); });
   CLEANUP.push(async () => { office.kill(); });
-  const says = (re) => until(`the office said ${re}`, () => re.test(said));
+  const says = (re, ms) => until(`the office said ${re}`, () => re.test(said), ms);
 
   await t.test("boot and the ticks after it: one blocked refresh read, the probe's; the roll has not started", async () => {
     await until("the boot read reached the store", async () => (await blockedBy(first)).length > 0);
@@ -130,11 +138,32 @@ test("POS-815 · the index refresh reads the probe, then the roll, one pen conne
     assert.equal(b.length, 1, "only the roll waits");
   });
 
-  await t.test("both refused at boot: the office listens with no as-of, and the next tick reads the index once the store answers", async () => {
+  await t.test("the 10 s boot bound lets the office listen while the roll still waits; the ticks after it skip; the roll ends at its own statement bound and the next tick reads the index", async () => {
+    // the roll from the case above, still waiting: NOT cancelled, so the boot read outlives the boot's 10 s race
     const [roll] = await blockedBy(first);
-    await su.query("SELECT pg_cancel_backend($1)", [roll.pid]);
-    await says(/listening on :\d+ — as-of unknown/);
-    await until("the next tick's probe waits", async () => (await blockedBy(first)).some((s) => s.kind === "probe"));
+    assert.equal(roll?.kind, "roll", "the roll is the read still waiting");
+    await says(/listening on :\d+ — as-of unknown/, BOUND_WAIT);
+    const atListen = await blockedBy(first);
+    assert.deepEqual(atListen.map((b) => [b.pid, b.kind]), [[roll.pid, "roll"]], "the office listened with the same roll still waiting, and nothing beside it");
+    // the interval's ticks after the boot returned: each skips while the boot's read is in flight
+    let max = 0;
+    const end = Date.now() + 5 * POLL_MS;
+    while (Date.now() < end) {
+      const b = await blockedBy(first);
+      max = Math.max(max, b.length);
+      assert.ok(b.every((x) => x.pid === roll.pid), `a tick started a read beside the boot's: ${JSON.stringify(b)}`);
+      await sleep(20);
+    }
+    assert.equal(max, 1, "five ticks after listening, still the one roll");
+    await says(/the store read has not answered within 10s/, BOUND_WAIT);
+    // Postgres's own statement_timeout (STORE_READ_BOUND_MS, unchanged) ends the roll; its connection comes home,
+    // and only then does a tick read again: the next probe waits on a session of its own turn
+    const next = await until("the roll ended at its statement bound and the next tick's probe waits", async () => {
+      const b = await blockedBy(first);
+      return b.length === 1 && b[0].kind === "probe" ? b[0] : null;
+    }, BOUND_WAIT);
+    const { rows: [was] } = await su.query("SELECT state FROM pg_stat_activity WHERE pid = $1", [roll.pid]);
+    assert.ok(!was || was.state === "idle" || next.pid === roll.pid, `the timed-out roll's connection was given back, not left in its transaction: ${JSON.stringify(was)}`);
     await first.query("ROLLBACK");
     await says(/\[office\] index reloaded — as-of aaaaaaaaaaaa \(was unknown\)/);
   });
